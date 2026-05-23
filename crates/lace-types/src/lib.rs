@@ -404,7 +404,11 @@ impl Checker {
                 out.unwrap_or(Type::Unit)
             }
             Expr::FnCall(call) => {
-                let args = call.args.iter().map(|a| self.infer_expr(a)).collect::<Vec<_>>();
+                let args = call
+                    .args
+                    .iter()
+                    .map(|a| self.infer_expr(a))
+                    .collect::<Vec<_>>();
                 if let Some((params, ret)) = self.fn_sigs.get(&call.name).cloned() {
                     for (i, arg) in args.iter().enumerate() {
                         if let Some(param) = params.get(i) {
@@ -428,7 +432,11 @@ impl Checker {
                 }
                 Type::Unknown
             }
-            Expr::FieldAccess { target, field, span } => match self.infer_expr(target) {
+            Expr::FieldAccess {
+                target,
+                field,
+                span,
+            } => match self.infer_expr(target) {
                 Type::Record(_, fields) => fields.get(field).cloned().unwrap_or(Type::Unknown),
                 _ => {
                     let found = self.infer_expr(target);
@@ -463,7 +471,11 @@ impl Checker {
                 let lt = self.infer_expr(left);
                 let rt = self.infer_expr(right);
                 match op {
-                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
+                    BinaryOp::Add
+                    | BinaryOp::Sub
+                    | BinaryOp::Mul
+                    | BinaryOp::Div
+                    | BinaryOp::Rem => {
                         if lt == Type::Float || rt == Type::Float {
                             Type::Float
                         } else {
@@ -510,11 +522,10 @@ impl Checker {
                 let mut params = Vec::new();
                 self.push_scope();
                 for p in &c.params {
-                    let t = p
-                        .ty
-                        .as_ref()
-                        .map(|x| self.resolve_type_expr(x))
-                        .unwrap_or(Type::Dynamic);
+                    let t =
+                        p.ty.as_ref()
+                            .map(|x| self.resolve_type_expr(x))
+                            .unwrap_or(Type::Dynamic);
                     self.define(p.name.clone(), t.clone());
                     params.push(t);
                 }
@@ -542,8 +553,9 @@ impl Checker {
                     }
                     Type::Record(r.name.clone(), fields)
                 } else {
-                    self.errors
-                        .push(TypeError::UnknownRecordType { name: r.name.clone() });
+                    self.errors.push(TypeError::UnknownRecordType {
+                        name: r.name.clone(),
+                    });
                     Type::Unknown
                 }
             }
@@ -601,34 +613,32 @@ impl Checker {
                     });
                 }
             }
-            Pattern::EnumTuple { name, elems, span } => {
-                match (name.as_str(), scrutinee) {
-                    ("Confident", Type::Confident(inner)) if elems.len() == 1 => {
-                        self.bind_pattern(&elems[0], inner);
-                    }
-                    ("Uncertain", Type::Uncertain(inner)) if elems.len() == 1 => {
-                        self.bind_pattern(&elems[0], inner);
-                    }
-                    ("Ok", Type::Result(ok, _)) if elems.len() == 1 => {
-                        self.bind_pattern(&elems[0], ok);
-                    }
-                    ("Err", Type::Result(_, err)) if elems.len() == 1 => {
-                        self.bind_pattern(&elems[0], err);
-                    }
-                    ("Some", Type::Option(inner)) if elems.len() == 1 => {
-                        self.bind_pattern(&elems[0], inner);
-                    }
-                    ("None", Type::Option(_)) if elems.is_empty() => {}
-                    _ => self.errors.push(TypeError::InvalidPattern {
-                        message: format!(
-                            "constructor pattern '{}' does not match scrutinee type {:?}",
-                            name, scrutinee
-                        ),
-                        span_start: span.start,
-                        span_end: span.end,
-                    }),
+            Pattern::EnumTuple { name, elems, span } => match (name.as_str(), scrutinee) {
+                ("Confident", Type::Confident(inner)) if elems.len() == 1 => {
+                    self.bind_pattern(&elems[0], inner);
                 }
-            }
+                ("Uncertain", Type::Uncertain(inner)) if elems.len() == 1 => {
+                    self.bind_pattern(&elems[0], inner);
+                }
+                ("Ok", Type::Result(ok, _)) if elems.len() == 1 => {
+                    self.bind_pattern(&elems[0], ok);
+                }
+                ("Err", Type::Result(_, err)) if elems.len() == 1 => {
+                    self.bind_pattern(&elems[0], err);
+                }
+                ("Some", Type::Option(inner)) if elems.len() == 1 => {
+                    self.bind_pattern(&elems[0], inner);
+                }
+                ("None", Type::Option(_)) if elems.is_empty() => {}
+                _ => self.errors.push(TypeError::InvalidPattern {
+                    message: format!(
+                        "constructor pattern '{}' does not match scrutinee type {:?}",
+                        name, scrutinee
+                    ),
+                    span_start: span.start,
+                    span_end: span.end,
+                }),
+            },
             Pattern::EnumStruct { span, .. } | Pattern::Record { span, .. } => {
                 // Structural pattern typing is intentionally lightweight in Phase 2.
                 if matches!(scrutinee, Type::Unknown | Type::Dynamic) {
@@ -723,7 +733,8 @@ impl Checker {
     }
 
     fn compatible(&self, a: &Type, b: &Type) -> bool {
-        if *a == Type::Unknown || *b == Type::Unknown || *a == Type::Dynamic || *b == Type::Dynamic {
+        if *a == Type::Unknown || *b == Type::Unknown || *a == Type::Dynamic || *b == Type::Dynamic
+        {
             return true;
         }
         a == b

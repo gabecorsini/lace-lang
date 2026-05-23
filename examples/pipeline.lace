@@ -1,0 +1,14 @@
+fn filter_even(values: List<Int>) -> List<Int> [Pure] {
+    values
+}
+
+fn scale(values: List<Int>) -> List<Int> [Pure] {
+    values
+}
+
+fn main() -> List<Int> [Pure] {
+    let input = [1, 2, 3, 4, 5]
+    input
+        |> filter_even()
+        |> scale()
+}

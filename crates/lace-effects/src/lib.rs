@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use lace_ast::{
-    Block, EffectExpr, EffectTag, Expr, FnDecl, Program, Stmt, ToolDecl, TopLevelItem,
+    AnnotationValue, Block, EffectExpr, EffectTag, Expr, FnDecl, MatchArm, Pattern, Program, Stmt,
+    ToolDecl, TopLevelItem,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,20 +192,347 @@ impl<'a> Checker<'a> {
             });
         }
 
-        let overdeclared = declared.difference(required).difference(EffectSet::from_effect_exprs(&[EffectExpr::Builtin(EffectTag::Pure)]));
+        let overdeclared = declared
+            .difference(required)
+            .difference(EffectSet::from_effect_exprs(&[EffectExpr::Builtin(
+                EffectTag::Pure,
+            )]));
         if !overdeclared.is_empty() {
             let names = overdeclared.to_names();
             if !names.is_empty() {
                 self.issues.push(EffectIssue {
                     function: function.name.clone(),
                     level: IssueLevel::Warning,
-                    message: format!("overdeclared effects: declared but unused [{}]", names.join(", ")),
+                    message: format!(
+                        "overdeclared effects: declared but unused [{}]",
+                        names.join(", ")
+                    ),
+                });
+            }
+        }
+
+        self.check_result_option_handling(function);
+        self.check_context_bounded(function);
+    }
+
+    fn check_result_option_handling(&mut self, function: &FnDecl) {
+        for stmt in &function.body.stmts {
+            self.scan_stmt_for_unhandled(stmt, &function.name);
+        }
+        if let Some(tail) = &function.body.tail_expr {
+            self.scan_expr_for_unhandled(tail, &function.name, false);
+        }
+    }
+
+    fn check_context_bounded(&mut self, function: &FnDecl) {
+        for ann in &function.annotations {
+            if ann.name != "context_bounded" {
+                continue;
+            }
+
+            let mut declared_tokens: Option<i64> = None;
+            for arg in &ann.args {
+                if arg.name == "tokens" {
+                    if let AnnotationValue::Int(v) = arg.value {
+                        declared_tokens = Some(v);
+                    }
+                }
+            }
+
+            if let Some(tokens) = declared_tokens {
+                if tokens <= 0 {
+                    self.issues.push(EffectIssue {
+                        function: function.name.clone(),
+                        level: IssueLevel::Warning,
+                        message: "@context_bounded(tokens: ...) should be > 0".into(),
+                    });
+                    continue;
+                }
+
+                let estimated = self.estimate_context_tokens(&function.body);
+                if estimated > tokens {
+                    self.issues.push(EffectIssue {
+                        function: function.name.clone(),
+                        level: IssueLevel::Warning,
+                        message: format!(
+                            "@context_bounded(tokens: {tokens}) may be exceeded (estimated {estimated})"
+                        ),
+                    });
+                }
+            } else {
+                self.issues.push(EffectIssue {
+                    function: function.name.clone(),
+                    level: IssueLevel::Warning,
+                    message: "@context_bounded annotation missing integer tokens argument".into(),
                 });
             }
         }
     }
 
-    fn infer_block_effects(&mut self, block: &Block, fn_name: &str, in_pure_block: bool) -> EffectSet {
+    fn estimate_context_tokens(&self, block: &Block) -> i64 {
+        fn score_expr(expr: &Expr) -> i64 {
+            match expr {
+                Expr::Literal(_, _) | Expr::Ident(_, _) => 8,
+                Expr::FnCall(call) => {
+                    let mut s = 24;
+                    if call.name.contains("tool")
+                        || call.name.contains("llm")
+                        || call.name.contains("search")
+                    {
+                        s += 256;
+                    }
+                    s + call.args.iter().map(score_expr).sum::<i64>()
+                }
+                Expr::MethodCall(call) => {
+                    16 + score_expr(&call.target) + call.args.iter().map(score_expr).sum::<i64>()
+                }
+                Expr::If(i) => {
+                    let mut s = 24;
+                    for (cond, blk) in &i.branches {
+                        s += score_expr(cond) + score_block(blk);
+                    }
+                    if let Some(else_blk) = &i.else_block {
+                        s += score_block(else_blk);
+                    }
+                    s
+                }
+                Expr::Match(m) => {
+                    let mut s = 32 + score_expr(&m.expr);
+                    for arm in &m.arms {
+                        s += score_expr(&arm.expr);
+                    }
+                    s
+                }
+                Expr::Block(b) => score_block(b),
+                Expr::Pipeline { left, right, .. } | Expr::Binary { left, right, .. } => {
+                    10 + score_expr(left) + score_expr(right)
+                }
+                Expr::Unary { expr, .. } | Expr::ErrorProp { expr, .. } => 6 + score_expr(expr),
+                Expr::FieldAccess { target, .. } => 4 + score_expr(target),
+                Expr::Index { target, index, .. } => 8 + score_expr(target) + score_expr(index),
+                Expr::Closure(c) => 20 + score_block(&c.body),
+                Expr::RecordLiteral(r) => {
+                    12 + r.fields.iter().map(|(_, e, _)| score_expr(e)).sum::<i64>()
+                }
+                Expr::ListLiteral { elems, .. } | Expr::TupleLiteral { elems, .. } => {
+                    8 + elems.iter().map(score_expr).sum::<i64>()
+                }
+                Expr::Return { value, .. } => value.as_ref().map(|v| score_expr(v)).unwrap_or(4),
+            }
+        }
+
+        fn score_stmt(stmt: &Stmt) -> i64 {
+            match stmt {
+                Stmt::Let(s) | Stmt::MutLet(s) => 6 + score_expr(&s.expr),
+                Stmt::Assign(s) => 6 + score_expr(&s.expr),
+                Stmt::Expr(e) => score_expr(e),
+                Stmt::For(f) => 32 + score_expr(&f.iter) + score_block(&f.body),
+                Stmt::While(w) => 32 + score_expr(&w.cond) + score_block(&w.body),
+                Stmt::PureBlock(b) => score_block(b),
+            }
+        }
+
+        fn score_block(block: &Block) -> i64 {
+            let mut total = 0;
+            for stmt in &block.stmts {
+                total += score_stmt(stmt);
+            }
+            if let Some(tail) = &block.tail_expr {
+                total += score_expr(tail);
+            }
+            total
+        }
+
+        score_block(block)
+    }
+
+    fn scan_stmt_for_unhandled(&mut self, stmt: &Stmt, function: &str) {
+        match stmt {
+            Stmt::Let(s) | Stmt::MutLet(s) => {
+                self.scan_expr_for_unhandled(&s.expr, function, false)
+            }
+            Stmt::Assign(s) => self.scan_expr_for_unhandled(&s.expr, function, false),
+            Stmt::Expr(e) => self.scan_expr_for_unhandled(e, function, true),
+            Stmt::For(f) => {
+                self.scan_expr_for_unhandled(&f.iter, function, false);
+                for s in &f.body.stmts {
+                    self.scan_stmt_for_unhandled(s, function);
+                }
+                if let Some(t) = &f.body.tail_expr {
+                    self.scan_expr_for_unhandled(t, function, false);
+                }
+            }
+            Stmt::While(w) => {
+                self.scan_expr_for_unhandled(&w.cond, function, false);
+                for s in &w.body.stmts {
+                    self.scan_stmt_for_unhandled(s, function);
+                }
+                if let Some(t) = &w.body.tail_expr {
+                    self.scan_expr_for_unhandled(t, function, false);
+                }
+            }
+            Stmt::PureBlock(b) => {
+                for s in &b.stmts {
+                    self.scan_stmt_for_unhandled(s, function);
+                }
+                if let Some(t) = &b.tail_expr {
+                    self.scan_expr_for_unhandled(t, function, false);
+                }
+            }
+        }
+    }
+
+    fn pattern_mentions(&self, pat: &Pattern, names: &[&str]) -> bool {
+        match pat {
+            Pattern::EnumTuple { name, .. } => names.iter().any(|n| n == name),
+            Pattern::EnumStruct { name, .. } | Pattern::Record { name, .. } => {
+                names.iter().any(|n| n == name)
+            }
+            Pattern::Or(a, b, _) => {
+                self.pattern_mentions(a, names) || self.pattern_mentions(b, names)
+            }
+            _ => false,
+        }
+    }
+
+    fn handles_result_option_match(&self, arms: &[MatchArm]) -> bool {
+        let has_ok = arms
+            .iter()
+            .any(|a| self.pattern_mentions(&a.pattern, &["Ok"]));
+        let has_err = arms
+            .iter()
+            .any(|a| self.pattern_mentions(&a.pattern, &["Err"]));
+        let has_some = arms
+            .iter()
+            .any(|a| self.pattern_mentions(&a.pattern, &["Some"]));
+        let has_none = arms
+            .iter()
+            .any(|a| self.pattern_mentions(&a.pattern, &["None"]));
+        (has_ok && has_err) || (has_some && has_none)
+    }
+
+    fn scan_expr_for_unhandled(&mut self, expr: &Expr, function: &str, warn_on_root: bool) {
+        if warn_on_root {
+            match expr {
+                Expr::FnCall(call) => {
+                    let name = call.name.as_str();
+                    if name.contains("result") || name.contains("option") || name.contains("try") {
+                        self.issues.push(EffectIssue {
+                            function: function.to_string(),
+                            level: IssueLevel::Warning,
+                            message: format!(
+                                "potentially unhandled Result/Option from call '{}' (consider match or ?)",
+                                call.name
+                            ),
+                        });
+                    }
+                }
+                Expr::ErrorProp { .. } => {}
+                Expr::Match(m) if self.handles_result_option_match(&m.arms) => {}
+                Expr::Match(_) => {
+                    self.issues.push(EffectIssue {
+                        function: function.to_string(),
+                        level: IssueLevel::Warning,
+                        message: "match expression may not fully handle Result/Option variants"
+                            .into(),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        match expr {
+            Expr::Block(b) => {
+                for s in &b.stmts {
+                    self.scan_stmt_for_unhandled(s, function);
+                }
+                if let Some(t) = &b.tail_expr {
+                    self.scan_expr_for_unhandled(t, function, false);
+                }
+            }
+            Expr::If(i) => {
+                for (cond, blk) in &i.branches {
+                    self.scan_expr_for_unhandled(cond, function, false);
+                    for s in &blk.stmts {
+                        self.scan_stmt_for_unhandled(s, function);
+                    }
+                    if let Some(t) = &blk.tail_expr {
+                        self.scan_expr_for_unhandled(t, function, false);
+                    }
+                }
+                if let Some(blk) = &i.else_block {
+                    for s in &blk.stmts {
+                        self.scan_stmt_for_unhandled(s, function);
+                    }
+                    if let Some(t) = &blk.tail_expr {
+                        self.scan_expr_for_unhandled(t, function, false);
+                    }
+                }
+            }
+            Expr::Match(m) => {
+                self.scan_expr_for_unhandled(&m.expr, function, false);
+                for arm in &m.arms {
+                    self.scan_expr_for_unhandled(&arm.expr, function, false);
+                }
+            }
+            Expr::FnCall(call) => {
+                for a in &call.args {
+                    self.scan_expr_for_unhandled(a, function, false);
+                }
+            }
+            Expr::MethodCall(call) => {
+                self.scan_expr_for_unhandled(&call.target, function, false);
+                for a in &call.args {
+                    self.scan_expr_for_unhandled(a, function, false);
+                }
+            }
+            Expr::FieldAccess { target, .. } => {
+                self.scan_expr_for_unhandled(target, function, false)
+            }
+            Expr::Index { target, index, .. } => {
+                self.scan_expr_for_unhandled(target, function, false);
+                self.scan_expr_for_unhandled(index, function, false);
+            }
+            Expr::Pipeline { left, right, .. } | Expr::Binary { left, right, .. } => {
+                self.scan_expr_for_unhandled(left, function, false);
+                self.scan_expr_for_unhandled(right, function, false);
+            }
+            Expr::Unary { expr, .. } | Expr::ErrorProp { expr, .. } => {
+                self.scan_expr_for_unhandled(expr, function, false)
+            }
+            Expr::Closure(c) => {
+                for s in &c.body.stmts {
+                    self.scan_stmt_for_unhandled(s, function);
+                }
+                if let Some(t) = &c.body.tail_expr {
+                    self.scan_expr_for_unhandled(t, function, false);
+                }
+            }
+            Expr::RecordLiteral(r) => {
+                for (_, e, _) in &r.fields {
+                    self.scan_expr_for_unhandled(e, function, false);
+                }
+            }
+            Expr::ListLiteral { elems, .. } | Expr::TupleLiteral { elems, .. } => {
+                for e in elems {
+                    self.scan_expr_for_unhandled(e, function, false);
+                }
+            }
+            Expr::Return { value, .. } => {
+                if let Some(v) = value {
+                    self.scan_expr_for_unhandled(v, function, false);
+                }
+            }
+            Expr::Literal(_, _) | Expr::Ident(_, _) => {}
+        }
+    }
+
+    fn infer_block_effects(
+        &mut self,
+        block: &Block,
+        fn_name: &str,
+        in_pure_block: bool,
+    ) -> EffectSet {
         let mut out = EffectSet::empty();
 
         for stmt in &block.stmts {
@@ -219,17 +547,17 @@ impl<'a> Checker<'a> {
 
     fn infer_stmt_effects(&mut self, stmt: &Stmt, fn_name: &str, in_pure_block: bool) -> EffectSet {
         match stmt {
-            Stmt::Let(s) | Stmt::MutLet(s) => self.infer_expr_effects(&s.expr, fn_name, in_pure_block),
+            Stmt::Let(s) | Stmt::MutLet(s) => {
+                self.infer_expr_effects(&s.expr, fn_name, in_pure_block)
+            }
             Stmt::Assign(s) => self.infer_expr_effects(&s.expr, fn_name, in_pure_block),
             Stmt::Expr(e) => self.infer_expr_effects(e, fn_name, in_pure_block),
-            Stmt::For(f) => {
-                self.infer_expr_effects(&f.iter, fn_name, in_pure_block)
-                    .union(self.infer_block_effects(&f.body, fn_name, in_pure_block))
-            }
-            Stmt::While(w) => {
-                self.infer_expr_effects(&w.cond, fn_name, in_pure_block)
-                    .union(self.infer_block_effects(&w.body, fn_name, in_pure_block))
-            }
+            Stmt::For(f) => self
+                .infer_expr_effects(&f.iter, fn_name, in_pure_block)
+                .union(self.infer_block_effects(&f.body, fn_name, in_pure_block)),
+            Stmt::While(w) => self
+                .infer_expr_effects(&w.cond, fn_name, in_pure_block)
+                .union(self.infer_block_effects(&w.body, fn_name, in_pure_block)),
             Stmt::PureBlock(b) => {
                 let effects = self.infer_block_effects(b, fn_name, true);
                 if effects.contains_tag(EffectTag::Io)
@@ -297,10 +625,7 @@ impl<'a> Checker<'a> {
                     self.issues.push(EffectIssue {
                         function: fn_name.to_string(),
                         level: IssueLevel::Error,
-                        message: format!(
-                            "pure block calls effectful function '{}'",
-                            call.name
-                        ),
+                        message: format!("pure block calls effectful function '{}'", call.name),
                     });
                 }
 
@@ -313,7 +638,9 @@ impl<'a> Checker<'a> {
                 }
                 out
             }
-            Expr::FieldAccess { target, .. } => self.infer_expr_effects(target, fn_name, in_pure_block),
+            Expr::FieldAccess { target, .. } => {
+                self.infer_expr_effects(target, fn_name, in_pure_block)
+            }
             Expr::Index { target, index, .. } => self
                 .infer_expr_effects(target, fn_name, in_pure_block)
                 .union(self.infer_expr_effects(index, fn_name, in_pure_block)),
@@ -348,21 +675,9 @@ impl<'a> Checker<'a> {
 
 fn stdlib_effect_for_name(name: &str) -> Option<EffectTag> {
     match name {
-        "read_file"
-        | "write_file"
-        | "append_file"
-        | "file_exists"
-        | "delete_file"
-        | "list_dir"
-        | "env_var"
-        | "env_var_required"
-        | "sleep"
-        | "print"
-        | "println"
-        | "read_line"
-        | "context_remaining"
-        | "context_used"
-        | "context_assert" => Some(EffectTag::Io),
+        "read_file" | "write_file" | "append_file" | "file_exists" | "delete_file" | "list_dir"
+        | "env_var" | "env_var_required" | "sleep" | "print" | "println" | "read_line"
+        | "context_remaining" | "context_used" | "context_assert" => Some(EffectTag::Io),
         "now_unix" | "now_millis" => Some(EffectTag::Time),
         "random_float" | "random_int" => Some(EffectTag::Rand),
         _ => None,

@@ -1,0 +1,8 @@
+@shell("echo '{\"source\":\"shell\",\"ok\":true,\"items\":[1,2,3]}'")
+tool shell_demo() -> Result<Dynamic, String>
+
+@context_bounded(tokens: 1024)
+fn main() -> Result<Dynamic, String> [ToolCall, IO] {
+    println("phase3 demo: invoking shell tool")
+    shell_demo()
+}

@@ -1,0 +1,14 @@
+tool classify_topic(prompt: String) -> Uncertain<List<String>>
+tool choose_topic(prompt: String) -> Confident<String>
+
+fn main() -> Unit [ToolCall, IO] {
+    let uncertain = classify_topic("design a robust coding agent")
+    match uncertain {
+        Uncertain(candidates) => println("uncertain: received candidate list"),
+    }
+
+    let confident = choose_topic("design a robust coding agent")
+    match confident {
+        Confident(choice) => println("confident: received a single best guess"),
+    }
+}

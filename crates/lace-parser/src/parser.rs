@@ -71,7 +71,11 @@ impl Parser {
         }
 
         if self.errors.is_empty() {
-            Some(Program { module, uses, items })
+            Some(Program {
+                module,
+                uses,
+                items,
+            })
         } else {
             None
         }
@@ -224,8 +228,10 @@ impl Parser {
         let ret_ty = self.parse_type_expr()?;
 
         let mut options = Vec::new();
-        while matches!(self.peek_kind(), TokenKind::Retries | TokenKind::Timeout | TokenKind::Mock)
-        {
+        while matches!(
+            self.peek_kind(),
+            TokenKind::Retries | TokenKind::Timeout | TokenKind::Mock
+        ) {
             let s = self.curr_span().start;
             match self.peek_kind() {
                 TokenKind::Retries => {
@@ -474,13 +480,29 @@ impl Parser {
             let start = self.prev_span().start;
             let name = self.expect_ident().unwrap_or_else(|| "<error>".into());
             let mut args = Vec::new();
+            let mut positional_idx = 0usize;
             if self.match_tok(&TokenKind::LParen) {
                 if !self.at(&TokenKind::RParen) {
                     loop {
                         let astart = self.curr_span().start;
-                        let aname = self.expect_ident().unwrap_or_else(|| "<error>".into());
-                        let _ = self.expect(TokenKind::Colon);
-                        let value = self.parse_annotation_value().unwrap_or(AnnotationValue::String("<error>".into()));
+                        let (aname, value) = if matches!(self.peek_kind(), TokenKind::Ident(_))
+                            && self.peek_n_is(1, &TokenKind::Colon)
+                        {
+                            let name = self.expect_ident().unwrap_or_else(|| "<error>".into());
+                            let _ = self.expect(TokenKind::Colon);
+                            let value = self
+                                .parse_annotation_value()
+                                .unwrap_or(AnnotationValue::String("<error>".into()));
+                            (name, value)
+                        } else {
+                            let value = self
+                                .parse_annotation_value()
+                                .unwrap_or(AnnotationValue::String("<error>".into()));
+                            let name = format!("arg{positional_idx}");
+                            positional_idx += 1;
+                            (name, value)
+                        };
+
                         args.push(AnnotationArg {
                             name: aname,
                             value,

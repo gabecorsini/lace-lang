@@ -1,13 +1,14 @@
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lace_ast::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     Unit,
     Int(i64),
@@ -32,7 +33,38 @@ pub struct RuntimeError {
     pub span: Option<Span>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
+pub struct RunOptions {
+    pub checkpoint_path: Option<String>,
+    pub replay_mode: bool,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            checkpoint_path: None,
+            replay_mode: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CheckpointState {
+    run_id: String,
+    seq: u64,
+    module_name: String,
+    journal_path: String,
+    checkpoint_path: String,
+    env: JsonValue,
+}
+
+#[derive(Debug, Clone)]
+struct ReplayCursor {
+    entries: Vec<JournalEntry>,
+    pos: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalEntry {
     pub id: String,
     pub run_id: String,
@@ -114,6 +146,8 @@ pub struct Interpreter {
     seq: u64,
     module_name: String,
     journal_path: String,
+    checkpoint_path: Option<String>,
+    replay: Option<ReplayCursor>,
     env: Env,
     functions: HashMap<String, FunctionDef>,
     tools: HashMap<String, ToolDef>,
@@ -121,6 +155,10 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new(module_name: Option<String>) -> Self {
+        Self::new_with_options(module_name, RunOptions::default())
+    }
+
+    pub fn new_with_options(module_name: Option<String>, options: RunOptions) -> Self {
         let run_id = format!(
             "run-{}",
             SystemTime::now()
@@ -129,11 +167,33 @@ impl Interpreter {
                 .as_millis()
         );
 
+        let replay = if options.replay_mode {
+            if let Some(path) = &options.checkpoint_path {
+                Some(load_replay_cursor(path).unwrap_or(ReplayCursor {
+                    entries: Vec::new(),
+                    pos: 0,
+                }))
+            } else {
+                Some(ReplayCursor {
+                    entries: Vec::new(),
+                    pos: 0,
+                })
+            }
+        } else {
+            None
+        };
+
         Self {
             run_id,
             seq: 0,
             module_name: module_name.unwrap_or_else(|| "main".into()),
-            journal_path: ".lace-journal".into(),
+            journal_path: options
+                .checkpoint_path
+                .as_ref()
+                .map(|p| format!("{p}.journal.ndjson"))
+                .unwrap_or_else(|| ".lace-journal.ndjson".into()),
+            checkpoint_path: options.checkpoint_path,
+            replay,
             env: Env::new(),
             functions: HashMap::new(),
             tools: HashMap::new(),
@@ -152,11 +212,17 @@ impl Interpreter {
         }
 
         // run main if present; otherwise Unit
-        if self.functions.contains_key("main") {
+        let out = if self.functions.contains_key("main") {
             self.call_function("main", vec![], Span::default())
         } else {
             Ok(Value::Unit)
+        }?;
+
+        if self.checkpoint_path.is_some() {
+            self.save_checkpoint_state()?;
         }
+
+        Ok(out)
     }
 
     fn register_items(&mut self, program: &Program) {
@@ -352,13 +418,19 @@ impl Interpreter {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.call_method(target, &call.method, args, call.span)
             }
-            Expr::FieldAccess { target, field, span } => {
+            Expr::FieldAccess {
+                target,
+                field,
+                span,
+            } => {
                 let obj = self.eval_expr(target)?;
                 match obj {
-                    Value::Record { fields, .. } => fields.get(field).cloned().ok_or_else(|| RuntimeError {
-                        message: format!("missing field '{}'", field),
-                        span: Some(*span),
-                    }),
+                    Value::Record { fields, .. } => {
+                        fields.get(field).cloned().ok_or_else(|| RuntimeError {
+                            message: format!("missing field '{}'", field),
+                            span: Some(*span),
+                        })
+                    }
                     _ => Err(RuntimeError {
                         message: "field access on non-record value".into(),
                         span: Some(*span),
@@ -393,11 +465,7 @@ impl Interpreter {
                     }),
                 }
             }
-            Expr::Pipeline {
-                left,
-                right,
-                span,
-            } => {
+            Expr::Pipeline { left, right, span } => {
                 let left_v = self.eval_expr(left)?;
                 match &**right {
                     Expr::FnCall(call) => {
@@ -502,7 +570,12 @@ impl Interpreter {
         }
     }
 
-    fn call_function(&mut self, name: &str, args: Vec<Value>, span: Span) -> Result<Value, RuntimeError> {
+    fn call_function(
+        &mut self,
+        name: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
         // stdlib builtins
         if let Some(v) = self.call_builtin(name, &args)? {
             return Ok(v);
@@ -549,6 +622,9 @@ impl Interpreter {
     fn call_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, RuntimeError> {
         match name {
             "print" | "println" => {
+                if let Some(entry) = self.replay_entry_for(name, "IO") {
+                    return Ok(Some(self.parse_replay_output(&entry.output)));
+                }
                 let msg = args.get(0).map(display_value).unwrap_or_else(String::new);
                 if name == "println" {
                     println!("{msg}");
@@ -567,6 +643,9 @@ impl Interpreter {
                 Ok(Some(Value::String(ty)))
             }
             "now_unix" => {
+                if let Some(entry) = self.replay_entry_for(name, "Time") {
+                    return Ok(Some(self.parse_replay_output(&entry.output)));
+                }
                 let val = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or(Duration::from_secs(0))
@@ -575,6 +654,9 @@ impl Interpreter {
                 Ok(Some(Value::Int(val)))
             }
             "now_millis" => {
+                if let Some(entry) = self.replay_entry_for(name, "Time") {
+                    return Ok(Some(self.parse_replay_output(&entry.output)));
+                }
                 let val = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or(Duration::from_secs(0))
@@ -594,6 +676,216 @@ impl Interpreter {
         span: Span,
     ) -> Result<Value, RuntimeError> {
         match method {
+            // Option
+            "unwrap_or" => match target {
+                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                    Ok(args.first().cloned().unwrap_or(Value::Unit))
+                }
+                _ => Err(RuntimeError {
+                    message: "unwrap_or expects Option value".into(),
+                    span: Some(span),
+                }),
+            },
+            "map" => match target {
+                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Some".into(),
+                        payload,
+                    })
+                }
+                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                    Ok(Value::Variant {
+                        name: "None".into(),
+                        payload: vec![],
+                    })
+                }
+                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Ok".into(),
+                        payload,
+                    })
+                }
+                Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Err".into(),
+                        payload,
+                    })
+                }
+                Value::List(items) => Ok(Value::List(items)),
+                _ => Err(RuntimeError {
+                    message: "map expects Option/Result/List value".into(),
+                    span: Some(span),
+                }),
+            },
+            "and_then" => match target {
+                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Some".into(),
+                        payload,
+                    })
+                }
+                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                    Ok(Value::Variant {
+                        name: "None".into(),
+                        payload: vec![],
+                    })
+                }
+                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Ok".into(),
+                        payload,
+                    })
+                }
+                Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                    Ok(Value::Variant {
+                        name: "Err".into(),
+                        payload,
+                    })
+                }
+                _ => Err(RuntimeError {
+                    message: "and_then expects Option or Result".into(),
+                    span: Some(span),
+                }),
+            },
+            "unwrap_or_else" => match target {
+                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                    if let Some(Value::String(_fn_name)) = args.first() {
+                        Ok(payload[0].clone())
+                    } else {
+                        Ok(Value::Unit)
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "unwrap_or_else expects Result".into(),
+                    span: Some(span),
+                }),
+            },
+
+            // String helpers
+            "trim" => match target {
+                Value::String(s) => Ok(Value::String(s.trim().to_string())),
+                _ => Err(RuntimeError {
+                    message: "trim expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "split" => match target {
+                Value::String(s) => {
+                    let delim = args.first().map(display_value).unwrap_or_default();
+                    Ok(Value::List(
+                        s.split(&delim)
+                            .map(|x| Value::String(x.to_string()))
+                            .collect(),
+                    ))
+                }
+                _ => Err(RuntimeError {
+                    message: "split expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "contains" => match target {
+                Value::String(s) => {
+                    let needle = args.first().map(display_value).unwrap_or_default();
+                    Ok(Value::Bool(s.contains(&needle)))
+                }
+                _ => Err(RuntimeError {
+                    message: "contains expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "starts_with" => match target {
+                Value::String(s) => {
+                    let needle = args.first().map(display_value).unwrap_or_default();
+                    Ok(Value::Bool(s.starts_with(&needle)))
+                }
+                _ => Err(RuntimeError {
+                    message: "starts_with expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "ends_with" => match target {
+                Value::String(s) => {
+                    let needle = args.first().map(display_value).unwrap_or_default();
+                    Ok(Value::Bool(s.ends_with(&needle)))
+                }
+                _ => Err(RuntimeError {
+                    message: "ends_with expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "to_upper" => match target {
+                Value::String(s) => Ok(Value::String(s.to_uppercase())),
+                _ => Err(RuntimeError {
+                    message: "to_upper expects String".into(),
+                    span: Some(span),
+                }),
+            },
+            "to_lower" => match target {
+                Value::String(s) => Ok(Value::String(s.to_lowercase())),
+                _ => Err(RuntimeError {
+                    message: "to_lower expects String".into(),
+                    span: Some(span),
+                }),
+            },
+
+            // List helpers (minimal builtins)
+            "filter" => match target {
+                Value::List(items) => Ok(Value::List(items)),
+                _ => Err(RuntimeError {
+                    message: "filter expects List".into(),
+                    span: Some(span),
+                }),
+            },
+            "fold" => match target {
+                Value::List(_items) => Ok(args.first().cloned().unwrap_or(Value::Unit)),
+                _ => Err(RuntimeError {
+                    message: "fold expects List".into(),
+                    span: Some(span),
+                }),
+            },
+            "collect" => match target {
+                Value::List(items) => Ok(Value::List(items)),
+                _ => Err(RuntimeError {
+                    message: "collect expects List".into(),
+                    span: Some(span),
+                }),
+            },
+            "zip" => match (target, args.first().cloned()) {
+                (Value::List(left), Some(Value::List(right))) => {
+                    let pairs = left
+                        .into_iter()
+                        .zip(right)
+                        .map(|(a, b)| Value::Tuple(vec![a, b]))
+                        .collect();
+                    Ok(Value::List(pairs))
+                }
+                _ => Err(RuntimeError {
+                    message: "zip expects two lists".into(),
+                    span: Some(span),
+                }),
+            },
+            "enumerate" => match target {
+                Value::List(items) => {
+                    let out = items
+                        .into_iter()
+                        .enumerate()
+                        .map(|(idx, v)| Value::Tuple(vec![Value::Int(idx as i64), v]))
+                        .collect();
+                    Ok(Value::List(out))
+                }
+                _ => Err(RuntimeError {
+                    message: "enumerate expects List".into(),
+                    span: Some(span),
+                }),
+            },
+
+            // Existing
             "unwrap" => match target {
                 Value::Variant { name, payload } if name == "Confident" && payload.len() == 1 => {
                     Ok(payload[0].clone())
@@ -638,13 +930,6 @@ impl Interpreter {
                     span: Some(span),
                 }),
             },
-            "map" if args.len() == 1 => {
-                // map with first arg being function-like is not implemented; keep explicit for phase 2.
-                Err(RuntimeError {
-                    message: "higher-order method calls are not implemented yet".into(),
-                    span: Some(span),
-                })
-            }
             _ => Err(RuntimeError {
                 message: format!("unsupported method '{}'", method),
                 span: Some(span),
@@ -652,13 +937,22 @@ impl Interpreter {
         }
     }
 
-    fn call_tool(&mut self, tool_name: &str, args: Vec<Value>, span: Span) -> Result<Value, RuntimeError> {
+    fn call_tool(
+        &mut self,
+        tool_name: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
         let Some(tool) = self.tools.get(tool_name).cloned() else {
             return Err(RuntimeError {
                 message: format!("unknown tool '{}'", tool_name),
                 span: Some(span),
             });
         };
+
+        if let Some(entry) = self.replay_entry_for(tool_name, "ToolCall") {
+            return Ok(self.parse_replay_output(&entry.output));
+        }
 
         let started = Instant::now();
 
@@ -670,11 +964,160 @@ impl Interpreter {
                     tool_name,
                     "ToolCall",
                     json!(args),
-                    json!({"mock": mock_name, "result": out}),
+                    json!(out),
                     started.elapsed().as_millis() as i64,
                 )?;
                 return Ok(out);
             }
+        }
+
+        let mut shell_cmd: Option<String> = None;
+        let mut http_method: Option<String> = None;
+        let mut http_url: Option<String> = None;
+        for ann in &tool.decl.annotations {
+            match ann.name.as_str() {
+                "shell" => {
+                    if let Some(arg) = ann.args.first() {
+                        if let AnnotationValue::String(cmd) = &arg.value {
+                            shell_cmd = Some(cmd.clone());
+                        }
+                    }
+                }
+                "http" => {
+                    if let Some(arg0) = ann.args.first() {
+                        if let AnnotationValue::String(method) = &arg0.value {
+                            http_method = Some(method.clone());
+                        }
+                    }
+                    if let Some(arg1) = ann.args.get(1) {
+                        if let AnnotationValue::String(url) = &arg1.value {
+                            http_url = Some(url.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(cmd_template) = shell_cmd {
+            let cmd = interpolate_template(&cmd_template, &tool.decl.params, &args);
+            let output = Command::new("bash")
+                .arg("-lc")
+                .arg(cmd)
+                .output()
+                .map_err(|e| RuntimeError {
+                    message: format!("shell tool '{}' failed to execute: {e}", tool_name),
+                    span: Some(span),
+                })?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+            if !output.status.success() {
+                let out = Value::Variant {
+                    name: "Err".into(),
+                    payload: vec![Value::Record {
+                        name: "ToolError".into(),
+                        fields: {
+                            let mut m = HashMap::new();
+                            m.insert("kind".into(), Value::String("ShellFailure".into()));
+                            m.insert(
+                                "message".into(),
+                                Value::String(format!(
+                                    "shell exited with status {:?}: {}",
+                                    output.status.code(),
+                                    stderr.trim()
+                                )),
+                            );
+                            m.insert(
+                                "status".into(),
+                                Value::Int(output.status.code().unwrap_or(-1) as i64),
+                            );
+                            m
+                        },
+                    }],
+                };
+                self.log_effect(
+                    tool_name,
+                    "ToolCall",
+                    json!(args),
+                    json!(out),
+                    started.elapsed().as_millis() as i64,
+                )?;
+                return Ok(out);
+            }
+
+            let parsed = parse_tool_success_output(&tool.decl.ret_ty, &stdout);
+            self.log_effect(
+                tool_name,
+                "ToolCall",
+                json!(args),
+                json!(parsed),
+                started.elapsed().as_millis() as i64,
+            )?;
+            return Ok(parsed);
+        }
+
+        if let (Some(method), Some(url_template)) = (http_method, http_url) {
+            let url = interpolate_template(&url_template, &tool.decl.params, &args);
+            let method_upper = method.to_uppercase();
+            let client = reqwest::blocking::Client::new();
+            let req = match method_upper.as_str() {
+                "GET" => client.get(&url),
+                "POST" => client.post(&url),
+                "PUT" => client.put(&url),
+                "PATCH" => client.patch(&url),
+                "DELETE" => client.delete(&url),
+                _ => {
+                    return Err(RuntimeError {
+                        message: format!("unsupported @http method '{}'", method),
+                        span: Some(span),
+                    })
+                }
+            };
+
+            let response = req.send().map_err(|e| RuntimeError {
+                message: format!("http tool '{}' request failed: {e}", tool_name),
+                span: Some(span),
+            })?;
+            let status = response.status().as_u16() as i64;
+            let body = response.text().unwrap_or_default();
+            if status >= 400 {
+                let out = Value::Variant {
+                    name: "Err".into(),
+                    payload: vec![Value::Record {
+                        name: "ToolError".into(),
+                        fields: {
+                            let mut m = HashMap::new();
+                            m.insert("kind".into(), Value::String("HttpFailure".into()));
+                            m.insert(
+                                "message".into(),
+                                Value::String(format!("http {} {} failed", method_upper, url)),
+                            );
+                            m.insert("status".into(), Value::Int(status));
+                            m.insert("body".into(), Value::String(body.clone()));
+                            m
+                        },
+                    }],
+                };
+                self.log_effect(
+                    tool_name,
+                    "ToolCall",
+                    json!(args),
+                    json!(out),
+                    started.elapsed().as_millis() as i64,
+                )?;
+                return Ok(out);
+            }
+
+            let parsed = parse_tool_success_output(&tool.decl.ret_ty, &body);
+            self.log_effect(
+                tool_name,
+                "ToolCall",
+                json!(args),
+                json!(parsed),
+                started.elapsed().as_millis() as i64,
+            )?;
+            return Ok(parsed);
         }
 
         let placeholder = placeholder_for_type(&tool.decl.ret_ty);
@@ -682,11 +1125,66 @@ impl Interpreter {
             tool_name,
             "ToolCall",
             json!(args),
-            json!({"stub": true, "result": placeholder}),
+            json!(placeholder),
             started.elapsed().as_millis() as i64,
         )?;
 
         Ok(placeholder)
+    }
+
+    fn save_checkpoint_state(&self) -> Result<(), RuntimeError> {
+        let Some(checkpoint_path) = &self.checkpoint_path else {
+            return Ok(());
+        };
+
+        let scopes_json = self
+            .env
+            .scopes
+            .iter()
+            .map(|scope| {
+                let mut m = serde_json::Map::new();
+                for (k, v) in scope {
+                    m.insert(k.clone(), value_to_json(v));
+                }
+                JsonValue::Object(m)
+            })
+            .collect::<Vec<_>>();
+
+        let state = CheckpointState {
+            run_id: self.run_id.clone(),
+            seq: self.seq,
+            module_name: self.module_name.clone(),
+            journal_path: self.journal_path.clone(),
+            checkpoint_path: checkpoint_path.clone(),
+            env: JsonValue::Array(scopes_json),
+        };
+
+        let state_text = serde_json::to_string_pretty(&state).map_err(|e| RuntimeError {
+            message: format!("failed to serialize checkpoint state: {e}"),
+            span: None,
+        })?;
+
+        fs::write(checkpoint_path, state_text).map_err(|e| RuntimeError {
+            message: format!("failed to write checkpoint file '{}': {e}", checkpoint_path),
+            span: None,
+        })
+    }
+
+    fn replay_entry_for(&mut self, fn_name: &str, effect: &str) -> Option<JournalEntry> {
+        let replay = self.replay.as_mut()?;
+        while replay.pos < replay.entries.len() {
+            let entry = replay.entries[replay.pos].clone();
+            replay.pos += 1;
+            if entry.fn_name == fn_name && entry.effect == effect {
+                self.seq = self.seq.max(entry.seq);
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn parse_replay_output(&self, output: &JsonValue) -> Value {
+        json_to_value(output.clone())
     }
 
     fn log_effect(
@@ -871,7 +1369,175 @@ impl Interpreter {
 }
 
 pub fn run(program: &Program) -> Result<Value, RuntimeError> {
-    Interpreter::new(program.module.as_ref().map(|m| m.path.join("."))).run_program(program)
+    run_with_options(program, RunOptions::default())
+}
+
+pub fn run_with_options(program: &Program, options: RunOptions) -> Result<Value, RuntimeError> {
+    Interpreter::new_with_options(program.module.as_ref().map(|m| m.path.join(".")), options)
+        .run_program(program)
+}
+
+fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
+    let content = fs::read_to_string(path).map_err(|e| RuntimeError {
+        message: format!("failed to read replay source '{}': {e}", path),
+        span: None,
+    })?;
+
+    // If the path points to a checkpoint state JSON, follow its journal_path.
+    if let Ok(state) = serde_json::from_str::<CheckpointState>(&content) {
+        let journal_content =
+            fs::read_to_string(&state.journal_path).map_err(|e| RuntimeError {
+                message: format!(
+                    "failed to read checkpoint journal '{}': {e}",
+                    state.journal_path
+                ),
+                span: None,
+            })?;
+        let mut entries = Vec::new();
+        for line in journal_content.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if let Ok(entry) = serde_json::from_str::<JournalEntry>(line) {
+                entries.push(entry);
+            }
+        }
+        return Ok(ReplayCursor { entries, pos: 0 });
+    }
+
+    // Otherwise treat as raw NDJSON journal.
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(entry) = serde_json::from_str::<JournalEntry>(line) {
+            entries.push(entry);
+        }
+    }
+    Ok(ReplayCursor { entries, pos: 0 })
+}
+
+fn interpolate_template(template: &str, params: &[ToolParam], args: &[Value]) -> String {
+    let mut out = template.to_string();
+    for (idx, param) in params.iter().enumerate() {
+        if let Some(arg) = args.get(idx) {
+            out = out.replace(&format!("{{{}}}", param.name), &display_value(arg));
+            out = out.replace(&format!("${{{}}}", param.name), &display_value(arg));
+        }
+    }
+    out
+}
+
+fn parse_tool_success_output(ret_ty: &TypeExpr, text: &str) -> Value {
+    if let TypeExpr::Generic { name, args, .. } = ret_ty {
+        if name == "Result" && args.len() == 2 {
+            let ok_val = parse_tool_ok_payload(&args[0], text);
+            return Value::Variant {
+                name: "Ok".into(),
+                payload: vec![ok_val],
+            };
+        }
+    }
+
+    parse_tool_ok_payload(ret_ty, text)
+}
+
+fn parse_tool_ok_payload(ty: &TypeExpr, text: &str) -> Value {
+    match ty {
+        TypeExpr::Primitive(PrimitiveType::String, _) => Value::String(text.to_string()),
+        TypeExpr::Dynamic(_) => serde_json::from_str::<JsonValue>(text)
+            .map(json_to_value)
+            .unwrap_or_else(|_| Value::String(text.to_string())),
+        TypeExpr::Named { name, .. } if name == "String" => Value::String(text.to_string()),
+        TypeExpr::Generic { name, .. } if name == "Json" => serde_json::from_str::<JsonValue>(text)
+            .map(json_to_value)
+            .unwrap_or_else(|_| Value::String(text.to_string())),
+        _ => serde_json::from_str::<JsonValue>(text)
+            .map(json_to_value)
+            .unwrap_or_else(|_| Value::String(text.to_string())),
+    }
+}
+
+fn json_to_value(v: JsonValue) -> Value {
+    match v {
+        JsonValue::Null => Value::Unit,
+        JsonValue::Bool(b) => Value::Bool(b),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else {
+                Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        JsonValue::String(s) => Value::String(s),
+        JsonValue::Array(arr) => Value::List(arr.into_iter().map(json_to_value).collect()),
+        JsonValue::Object(obj) => {
+            if let Some(JsonValue::String(tag)) = obj.get("__variant") {
+                let payload = obj
+                    .get("payload")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().cloned().map(json_to_value).collect())
+                    .unwrap_or_default();
+                return Value::Variant {
+                    name: tag.clone(),
+                    payload,
+                };
+            }
+
+            if let Some(JsonValue::String(tag)) = obj.get("__record") {
+                let fields = obj
+                    .get("fields")
+                    .and_then(|v| v.as_object())
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| (k.clone(), json_to_value(v.clone())))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                return Value::Record {
+                    name: tag.clone(),
+                    fields,
+                };
+            }
+
+            Value::Record {
+                name: "Json".into(),
+                fields: obj
+                    .into_iter()
+                    .map(|(k, v)| (k, json_to_value(v)))
+                    .collect(),
+            }
+        }
+    }
+}
+
+fn value_to_json(v: &Value) -> JsonValue {
+    match v {
+        Value::Unit => JsonValue::Null,
+        Value::Int(i) => json!(i),
+        Value::Float(f) => json!(f),
+        Value::Bool(b) => json!(b),
+        Value::String(s) => json!(s),
+        Value::List(xs) => JsonValue::Array(xs.iter().map(value_to_json).collect()),
+        Value::Tuple(xs) => json!({
+            "__tuple": xs.iter().map(value_to_json).collect::<Vec<_>>()
+        }),
+        Value::Record { name, fields } => {
+            let mut map = serde_json::Map::new();
+            map.insert("__record".into(), JsonValue::String(name.clone()));
+            let f = fields
+                .iter()
+                .map(|(k, v)| (k.clone(), value_to_json(v)))
+                .collect::<serde_json::Map<_, _>>();
+            map.insert("fields".into(), JsonValue::Object(f));
+            JsonValue::Object(map)
+        }
+        Value::Variant { name, payload } => json!({
+            "__variant": name,
+            "payload": payload.iter().map(value_to_json).collect::<Vec<_>>()
+        }),
+    }
 }
 
 fn type_error<T>(span: Span, msg: &str) -> Result<T, RuntimeError> {

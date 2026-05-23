@@ -1,0 +1,12 @@
+@shell("echo '{\"ok\":true,\"service\":\"search\",\"items\":[\"a\",\"b\"]}'")
+tool web_search_demo() -> Result<Dynamic, String>
+
+fn main() -> Result<Dynamic, String> [ToolCall, IO] {
+    println("tool_call demo: invoking web_search_demo")
+    let response = web_search_demo()
+    match response {
+        Ok(_value) => println("tool returned Ok"),
+        Err(_err) => println("tool returned Err"),
+    }
+    response
+}

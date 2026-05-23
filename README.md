@@ -1,32 +1,116 @@
 # Lace
 
-> A programming language designed for agents, by an agent.
+A programming language designed for agentic execution.
 
-Lace is an open-source language built for agentic execution — predictable, auditable, and composable. It makes agent mistakes *obvious and recoverable* rather than silent and catastrophic.
+Lace is built for a world where software agents call tools, mutate state, and fail in predictable ways. Instead of hiding those failures, Lace makes them explicit: effects are typed, uncertainty is represented in the type system, and side effects can be replayed deterministically.
 
-## Core Philosophy
+## Why Lace exists
 
-Agents fail in predictable ways: ambiguous state, silent errors, non-deterministic tool calls, and context blowout. Lace is designed to make those failure modes impossible or loud.
+Agent systems usually break in familiar ways:
+- silent tool failures and retries without traceability
+- hidden side effects and non-deterministic runs
+- ambiguous outputs that downstream code treats as certain
+- context blowouts that degrade quality over time
 
-## Key Design Goals
+Lace is designed so these problems are loud and inspectable.
 
-- **First-class tools** — tools are typed, mockable, and retryable by default
-- **Effect types** — functions declare I/O, mutation, tool calls, or pure computation
-- **Explicit uncertainty** — `Confident<T>` vs `Uncertain<[T]>` are real types
-- **Deterministic replay** — every side-effectful call is logged; failed runs can resume from any checkpoint
-- **No nulls, no exceptions** — errors are values, `Option<T>` everywhere
-- **Pipeline syntax** — `|>` operator for composing tool chains
-- **Context budget awareness** — `@context_bounded(tokens: N)` decorator catches blowouts at compile time
-- **Immutable by default** — explicit `mut` opt-in
+## Current highlights
 
-## Type System
+- First-class tool declarations with typed signatures
+- Effect-annotated functions (`[Pure]`, `[IO]`, `[ToolCall]`, ...)
+- Explicit uncertainty types (`Confident<T>`, `Uncertain<T>`)
+- Pipeline syntax (`|>`) for composable data flow
+- Checkpoint + replay runtime support for deterministic recovery
 
-Static + gradual. Types flow forward through pipelines. Effect types are first-class. Built in Rust.
+## Quick start
 
-## Status
+Requirements:
+- Rust stable toolchain
 
-Early language design / scoping phase.
+Build the workspace:
+
+```bash
+cargo build --workspace
+```
+
+Run CLI help:
+
+```bash
+./target/debug/lace --help
+```
+
+Check and run an example:
+
+```bash
+./target/debug/lace check examples/hello.lace
+./target/debug/lace run examples/hello.lace
+```
+
+## Language snippets
+
+### 1) Pipeline composition
+
+```lace
+fn filter_even(values: List<Int>) -> List<Int> [Pure] { values }
+fn scale(values: List<Int>) -> List<Int> [Pure] { values }
+
+fn main() -> List<Int> [Pure] {
+  [1, 2, 3, 4, 5]
+    |> filter_even()
+    |> scale()
+}
+```
+
+### 2) Effect-typed entrypoint with tool call
+
+```lace
+@shell("echo '{\"ok\":true}'")
+tool ping() -> Result<Dynamic, String>
+
+fn main() -> Result<Dynamic, String> [ToolCall, IO] {
+  println("calling tool")
+  ping()
+}
+```
+
+### 3) Explicit uncertainty
+
+```lace
+tool classify(prompt: String) -> Uncertain<List<String>>
+
+fn main() -> Unit [ToolCall, IO] {
+  let result = classify("design a robust coding agent")
+  match result {
+    Uncertain(_candidates) => println("model returned multiple plausible answers"),
+  }
+}
+```
+
+## Project roadmap
+
+Completed:
+- Phase 1: core parser/type/effect/interpreter skeleton
+- Phase 2: typed values and effect validation expansion
+- Phase 3: tool-call surface + replay/checkpoint foundations
+- Phase 4: polished CLI (`run/check/repl/version`), public docs, and curated examples
+
+Next:
+- stronger pattern-matching/runtime coverage
+- richer stdlib surface and collection transforms
+- package/module boundaries and import system
+- expanded test matrix and conformance suites
+
+## Repository layout
+
+- `crates/lace-ast`: AST definitions shared across compiler/runtime stages
+- `crates/lace-lexer`: tokenization
+- `crates/lace-parser`: parser + parse diagnostics
+- `crates/lace-types`: static type checker
+- `crates/lace-effects`: effect checker and effect diagnostics
+- `crates/lace-interp`: interpreter runtime with tool execution + replay hooks
+- `crates/lace-stdlib`: standard library surface/types
+- `crates/lace-cli`: command-line interface (`lace` binary)
 
 ## License
 
-Open source (TBD — likely MIT or Apache 2.0)
+Apache-2.0

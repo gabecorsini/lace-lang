@@ -548,6 +548,10 @@ impl<'a> Lexer<'a> {
 
     #[allow(dead_code)]
     fn _slice(&self, start: usize, end: usize) -> String {
-        self.src.chars().skip(start).take(end.saturating_sub(start)).collect()
+        self.src
+            .chars()
+            .skip(start)
+            .take(end.saturating_sub(start))
+            .collect()
     }
 }
