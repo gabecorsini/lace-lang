@@ -1609,7 +1609,7 @@ impl Parser {
         if idx >= self.tokens.len() {
             return false;
         }
-        let mut tmp = Parser {
+        let tmp = Parser {
             tokens: vec![self.tokens[idx].clone()],
             pos: 0,
             errors: Vec::new(),
@@ -1676,7 +1676,7 @@ impl Parser {
         if self.pos == 0 {
             return false;
         }
-        let mut tmp = Parser {
+        let tmp = Parser {
             tokens: vec![self.tokens[self.pos - 1].clone()],
             pos: 0,
             errors: Vec::new(),

@@ -13,6 +13,9 @@ pub enum Type {
     Unit,
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
+    Confident(Box<Type>),
+    Uncertain(Box<Type>),
+    Scored(Box<Type>),
     Record(String, BTreeMap<String, Type>),
     Tuple(Vec<Type>),
     List(Box<Type>),
@@ -46,6 +49,14 @@ pub enum TypeError {
     },
     #[error("unknown record type '{name}'")]
     UnknownRecordType { name: String },
+    #[error("invalid pattern at {span_start}..{span_end}: {message}")]
+    InvalidPattern {
+        message: String,
+        span_start: usize,
+        span_end: usize,
+    },
+    #[error("invalid tool declaration '{name}': {message}")]
+    InvalidToolDecl { name: String, message: String },
 }
 
 #[derive(Debug, Clone)]
@@ -69,14 +80,25 @@ struct Checker {
 
 impl Checker {
     fn new() -> Self {
-        Self {
+        let mut checker = Self {
             scopes: vec![Scope {
                 vars: HashMap::new(),
             }],
             fn_sigs: HashMap::new(),
             record_types: HashMap::new(),
             errors: Vec::new(),
-        }
+        };
+        checker.install_prelude();
+        checker
+    }
+
+    fn install_prelude(&mut self) {
+        self.fn_sigs
+            .insert("print".into(), (vec![Type::String], Type::Unit));
+        self.fn_sigs
+            .insert("println".into(), (vec![Type::String], Type::Unit));
+        self.fn_sigs
+            .insert("type_of".into(), (vec![Type::Dynamic], Type::String));
     }
 
     fn collect_signatures(&mut self, program: &Program) {
@@ -102,6 +124,15 @@ impl Checker {
                         .unwrap_or(Type::Unit);
                     self.fn_sigs.insert(f.name.clone(), (params, ret));
                 }
+                TopLevelItem::Tool(t) => {
+                    let params = t
+                        .params
+                        .iter()
+                        .map(|p| self.resolve_type_expr(&p.ty))
+                        .collect::<Vec<_>>();
+                    let ret = self.resolve_type_expr(&t.ret_ty);
+                    self.fn_sigs.insert(t.name.clone(), (params, ret));
+                }
                 _ => {}
             }
         }
@@ -116,7 +147,113 @@ impl Checker {
                     self.unify(expected, found, c.span);
                 }
                 TopLevelItem::Function(f) => self.check_fn(f),
+                TopLevelItem::Tool(t) => self.check_tool_decl(t),
                 _ => {}
+            }
+        }
+    }
+
+    fn check_tool_decl(&mut self, t: &ToolDecl) {
+        for p in &t.params {
+            if let Some(default) = &p.default {
+                let expected = self.resolve_type_expr(&p.ty);
+                let found = self.infer_expr(default);
+                self.unify(expected, found, p.span);
+            }
+        }
+
+        let mut seen_retries = false;
+        let mut seen_timeout = false;
+        let mut seen_mock = false;
+        for opt in &t.options {
+            match opt {
+                ToolOption::Retries(v, _) => {
+                    if *v < 0 {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: "retries must be >= 0".into(),
+                        });
+                    }
+                    if seen_retries {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: "duplicate retries option".into(),
+                        });
+                    }
+                    seen_retries = true;
+                }
+                ToolOption::Timeout(d, _) => {
+                    if d.value <= 0 {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: "timeout must be > 0".into(),
+                        });
+                    }
+                    if seen_timeout {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: "duplicate timeout option".into(),
+                        });
+                    }
+                    seen_timeout = true;
+                }
+                ToolOption::Mock(mock_name, _) => {
+                    if seen_mock {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: "duplicate mock option".into(),
+                        });
+                    }
+                    seen_mock = true;
+
+                    if let Some((mock_params, mock_ret)) = self.fn_sigs.get(mock_name).cloned() {
+                        let tool_params = t
+                            .params
+                            .iter()
+                            .map(|p| self.resolve_type_expr(&p.ty))
+                            .collect::<Vec<_>>();
+                        let tool_ret = self.resolve_type_expr(&t.ret_ty);
+
+                        if mock_params.len() != tool_params.len() {
+                            self.errors.push(TypeError::InvalidToolDecl {
+                                name: t.name.clone(),
+                                message: format!(
+                                    "mock '{}' arity mismatch: expected {}, got {}",
+                                    mock_name,
+                                    tool_params.len(),
+                                    mock_params.len()
+                                ),
+                            });
+                        }
+
+                        for (expected, found) in tool_params.iter().zip(mock_params.iter()) {
+                            if !self.compatible(expected, found) {
+                                self.errors.push(TypeError::InvalidToolDecl {
+                                    name: t.name.clone(),
+                                    message: format!(
+                                        "mock '{}' parameter type mismatch: expected {:?}, found {:?}",
+                                        mock_name, expected, found
+                                    ),
+                                });
+                            }
+                        }
+
+                        if !self.compatible(&tool_ret, &mock_ret) {
+                            self.errors.push(TypeError::InvalidToolDecl {
+                                name: t.name.clone(),
+                                message: format!(
+                                    "mock '{}' return type mismatch: expected {:?}, found {:?}",
+                                    mock_name, tool_ret, mock_ret
+                                ),
+                            });
+                        }
+                    } else {
+                        self.errors.push(TypeError::InvalidToolDecl {
+                            name: t.name.clone(),
+                            message: format!("mock function '{}' not found", mock_name),
+                        });
+                    }
+                }
             }
         }
     }
@@ -252,10 +389,13 @@ impl Checker {
                 branch_t.unwrap_or(Type::Unit)
             }
             Expr::Match(m) => {
-                let _scrutinee = self.infer_expr(&m.expr);
+                let scrutinee = self.infer_expr(&m.expr);
                 let mut out: Option<Type> = None;
                 for arm in &m.arms {
+                    self.push_scope();
+                    self.bind_pattern(&arm.pattern, &scrutinee);
                     let t = self.infer_expr(&arm.expr);
+                    self.pop_scope();
                     out = Some(match out {
                         Some(prev) => self.unify_soft(prev, t),
                         None => t,
@@ -370,7 +510,11 @@ impl Checker {
                 let mut params = Vec::new();
                 self.push_scope();
                 for p in &c.params {
-                    let t = p.ty.as_ref().map(|x| self.resolve_type_expr(x)).unwrap_or(Type::Dynamic);
+                    let t = p
+                        .ty
+                        .as_ref()
+                        .map(|x| self.resolve_type_expr(x))
+                        .unwrap_or(Type::Dynamic);
                     self.define(p.name.clone(), t.clone());
                     params.push(t);
                 }
@@ -379,7 +523,8 @@ impl Checker {
                     .as_ref()
                     .map(|t| self.resolve_type_expr(t))
                     .unwrap_or_else(|| {
-                        c.body.tail_expr
+                        c.body
+                            .tail_expr
                             .as_ref()
                             .map(|e| self.infer_expr(e))
                             .unwrap_or(Type::Unit)
@@ -428,6 +573,76 @@ impl Checker {
         }
     }
 
+    fn bind_pattern(&mut self, pat: &Pattern, scrutinee: &Type) {
+        match pat {
+            Pattern::Wildcard(_) => {}
+            Pattern::Literal(l, span) => {
+                let expected = match l {
+                    Literal::Int(_) => Type::Int,
+                    Literal::Float(_) => Type::Float,
+                    Literal::String(_) => Type::String,
+                    Literal::Bool(_) => Type::Bool,
+                };
+                self.unify(expected, scrutinee.clone(), *span);
+            }
+            Pattern::Ident(name, _) => {
+                self.define(name.clone(), scrutinee.clone());
+            }
+            Pattern::Tuple(parts, span) => {
+                if let Type::Tuple(elems) = scrutinee {
+                    for (p, t) in parts.iter().zip(elems.iter()) {
+                        self.bind_pattern(p, t);
+                    }
+                } else {
+                    self.errors.push(TypeError::InvalidPattern {
+                        message: "tuple pattern used on non-tuple value".into(),
+                        span_start: span.start,
+                        span_end: span.end,
+                    });
+                }
+            }
+            Pattern::EnumTuple { name, elems, span } => {
+                match (name.as_str(), scrutinee) {
+                    ("Confident", Type::Confident(inner)) if elems.len() == 1 => {
+                        self.bind_pattern(&elems[0], inner);
+                    }
+                    ("Uncertain", Type::Uncertain(inner)) if elems.len() == 1 => {
+                        self.bind_pattern(&elems[0], inner);
+                    }
+                    ("Ok", Type::Result(ok, _)) if elems.len() == 1 => {
+                        self.bind_pattern(&elems[0], ok);
+                    }
+                    ("Err", Type::Result(_, err)) if elems.len() == 1 => {
+                        self.bind_pattern(&elems[0], err);
+                    }
+                    ("Some", Type::Option(inner)) if elems.len() == 1 => {
+                        self.bind_pattern(&elems[0], inner);
+                    }
+                    ("None", Type::Option(_)) if elems.is_empty() => {}
+                    _ => self.errors.push(TypeError::InvalidPattern {
+                        message: format!(
+                            "constructor pattern '{}' does not match scrutinee type {:?}",
+                            name, scrutinee
+                        ),
+                        span_start: span.start,
+                        span_end: span.end,
+                    }),
+                }
+            }
+            Pattern::EnumStruct { span, .. } | Pattern::Record { span, .. } => {
+                // Structural pattern typing is intentionally lightweight in Phase 2.
+                if matches!(scrutinee, Type::Unknown | Type::Dynamic) {
+                    return;
+                }
+                let _ = span;
+            }
+            Pattern::Or(left, right, _) => {
+                self.bind_pattern(left, scrutinee);
+                self.bind_pattern(right, scrutinee);
+            }
+        }
+    }
+
     fn infer_block_type(&mut self, b: &Block) -> Type {
         self.push_scope();
         for s in &b.stmts {
@@ -462,7 +677,10 @@ impl Checker {
             ),
             TypeExpr::Named { name, .. } => Type::Named(name.clone(), Vec::new()),
             TypeExpr::Generic { name, args, .. } => {
-                let lowered = args.iter().map(|a| self.resolve_type_expr(a)).collect::<Vec<_>>();
+                let lowered = args
+                    .iter()
+                    .map(|a| self.resolve_type_expr(a))
+                    .collect::<Vec<_>>();
                 match name.as_str() {
                     "Option" if lowered.len() == 1 => Type::Option(Box::new(lowered[0].clone())),
                     "Result" if lowered.len() == 2 => {
@@ -472,6 +690,13 @@ impl Checker {
                     "Map" if lowered.len() == 2 => {
                         Type::Map(Box::new(lowered[0].clone()), Box::new(lowered[1].clone()))
                     }
+                    "Confident" if lowered.len() == 1 => {
+                        Type::Confident(Box::new(lowered[0].clone()))
+                    }
+                    "Uncertain" if lowered.len() == 1 => {
+                        Type::Uncertain(Box::new(lowered[0].clone()))
+                    }
+                    "Scored" if lowered.len() == 1 => Type::Scored(Box::new(lowered[0].clone())),
                     _ => Type::Named(name.clone(), lowered),
                 }
             }

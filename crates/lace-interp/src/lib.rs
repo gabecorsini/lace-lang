@@ -1,15 +1,999 @@
-use lace_ast::Program;
+use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, PartialEq)]
+use lace_ast::*;
+use serde::Serialize;
+use serde_json::{json, Value as JsonValue};
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Value {
     Unit,
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    String(String),
+    List(Vec<Value>),
+    Tuple(Vec<Value>),
+    Record {
+        name: String,
+        fields: HashMap<String, Value>,
+    },
+    Variant {
+        name: String,
+        payload: Vec<Value>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeError {
     pub message: String,
+    pub span: Option<Span>,
 }
 
-pub fn run(_program: &Program) -> Result<Value, RuntimeError> {
-    Ok(Value::Unit)
+#[derive(Debug, Clone, Serialize)]
+pub struct JournalEntry {
+    pub id: String,
+    pub run_id: String,
+    pub seq: u64,
+    pub timestamp: i64,
+    pub effect: String,
+    pub fn_name: String,
+    pub module: String,
+    pub inputs: JsonValue,
+    pub output: JsonValue,
+    pub duration_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionDef {
+    params: Vec<String>,
+    body: Block,
+}
+
+#[derive(Debug, Clone)]
+struct ToolDef {
+    decl: ToolDecl,
+}
+
+#[derive(Debug)]
+struct Env {
+    scopes: Vec<HashMap<String, Value>>,
+}
+
+#[derive(Debug)]
+enum EvalFlow {
+    Value(Value),
+    Return(Value),
+}
+
+impl Env {
+    fn new() -> Self {
+        Self {
+            scopes: vec![HashMap::new()],
+        }
+    }
+
+    fn push(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop(&mut self) {
+        let _ = self.scopes.pop();
+    }
+
+    fn define(&mut self, name: String, value: Value) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, value);
+        }
+    }
+
+    fn assign(&mut self, name: &str, value: Value) -> bool {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(name) {
+                scope.insert(name.to_string(), value);
+                return true;
+            }
+        }
+        false
+    }
+
+    fn get(&self, name: &str) -> Option<Value> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(v) = scope.get(name) {
+                return Some(v.clone());
+            }
+        }
+        None
+    }
+}
+
+pub struct Interpreter {
+    run_id: String,
+    seq: u64,
+    module_name: String,
+    journal_path: String,
+    env: Env,
+    functions: HashMap<String, FunctionDef>,
+    tools: HashMap<String, ToolDef>,
+}
+
+impl Interpreter {
+    pub fn new(module_name: Option<String>) -> Self {
+        let run_id = format!(
+            "run-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis()
+        );
+
+        Self {
+            run_id,
+            seq: 0,
+            module_name: module_name.unwrap_or_else(|| "main".into()),
+            journal_path: ".lace-journal".into(),
+            env: Env::new(),
+            functions: HashMap::new(),
+            tools: HashMap::new(),
+        }
+    }
+
+    pub fn run_program(mut self, program: &Program) -> Result<Value, RuntimeError> {
+        self.register_items(program);
+
+        // execute top-level consts as bindings
+        for item in &program.items {
+            if let TopLevelItem::Const(c) = item {
+                let value = self.eval_expr(&c.expr)?;
+                self.env.define(c.name.clone(), value);
+            }
+        }
+
+        // run main if present; otherwise Unit
+        if self.functions.contains_key("main") {
+            self.call_function("main", vec![], Span::default())
+        } else {
+            Ok(Value::Unit)
+        }
+    }
+
+    fn register_items(&mut self, program: &Program) {
+        if let Some(module) = &program.module {
+            self.module_name = module.path.join(".");
+        }
+
+        for item in &program.items {
+            match item {
+                TopLevelItem::Function(f) => {
+                    self.functions.insert(
+                        f.name.clone(),
+                        FunctionDef {
+                            params: f.params.iter().map(|p| p.name.clone()).collect(),
+                            body: f.body.clone(),
+                        },
+                    );
+                }
+                TopLevelItem::Tool(t) => {
+                    self.tools
+                        .insert(t.name.clone(), ToolDef { decl: t.clone() });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn eval_block(&mut self, block: &Block) -> Result<EvalFlow, RuntimeError> {
+        self.env.push();
+
+        for stmt in &block.stmts {
+            match self.eval_stmt(stmt)? {
+                EvalFlow::Value(_) => {}
+                EvalFlow::Return(v) => {
+                    self.env.pop();
+                    return Ok(EvalFlow::Return(v));
+                }
+            }
+        }
+
+        let out = if let Some(tail) = &block.tail_expr {
+            match self.eval_expr_flow(tail)? {
+                EvalFlow::Value(v) => EvalFlow::Value(v),
+                EvalFlow::Return(v) => EvalFlow::Return(v),
+            }
+        } else {
+            EvalFlow::Value(Value::Unit)
+        };
+
+        self.env.pop();
+        Ok(out)
+    }
+
+    fn eval_stmt(&mut self, stmt: &Stmt) -> Result<EvalFlow, RuntimeError> {
+        match stmt {
+            Stmt::Let(s) | Stmt::MutLet(s) => {
+                let value = self.eval_expr(&s.expr)?;
+                self.env.define(s.name.clone(), value);
+                Ok(EvalFlow::Value(Value::Unit))
+            }
+            Stmt::Assign(s) => {
+                let value = self.eval_expr(&s.expr)?;
+                if !self.env.assign(&s.name, value) {
+                    return Err(RuntimeError {
+                        message: format!("unknown variable '{}'", s.name),
+                        span: Some(s.span),
+                    });
+                }
+                Ok(EvalFlow::Value(Value::Unit))
+            }
+            Stmt::Expr(e) => self.eval_expr_flow(e),
+            Stmt::For(f) => {
+                let iter = self.eval_expr(&f.iter)?;
+                if let Value::List(items) = iter {
+                    for item in items {
+                        self.env.push();
+                        self.env.define(f.name.clone(), item);
+                        match self.eval_block(&f.body)? {
+                            EvalFlow::Value(_) => {}
+                            EvalFlow::Return(v) => {
+                                self.env.pop();
+                                return Ok(EvalFlow::Return(v));
+                            }
+                        }
+                        self.env.pop();
+                    }
+                    Ok(EvalFlow::Value(Value::Unit))
+                } else {
+                    Err(RuntimeError {
+                        message: "for-loop requires a list iterator".into(),
+                        span: Some(f.span),
+                    })
+                }
+            }
+            Stmt::While(w) => {
+                loop {
+                    let cond = self.eval_expr(&w.cond)?;
+                    if !as_bool(&cond) {
+                        break;
+                    }
+                    match self.eval_block(&w.body)? {
+                        EvalFlow::Value(_) => {}
+                        EvalFlow::Return(v) => return Ok(EvalFlow::Return(v)),
+                    }
+                }
+                Ok(EvalFlow::Value(Value::Unit))
+            }
+            Stmt::PureBlock(b) => self.eval_block(b),
+        }
+    }
+
+    fn eval_expr_flow(&mut self, expr: &Expr) -> Result<EvalFlow, RuntimeError> {
+        match expr {
+            Expr::Return { value, .. } => {
+                let v = if let Some(v) = value {
+                    self.eval_expr(v)?
+                } else {
+                    Value::Unit
+                };
+                Ok(EvalFlow::Return(v))
+            }
+            _ => self.eval_expr(expr).map(EvalFlow::Value),
+        }
+    }
+
+    fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
+        match expr {
+            Expr::Literal(lit, _) => Ok(match lit {
+                Literal::Int(v) => Value::Int(*v),
+                Literal::Float(v) => Value::Float(v.parse::<f64>().unwrap_or(0.0)),
+                Literal::String(v) => Value::String(v.clone()),
+                Literal::Bool(v) => Value::Bool(*v),
+            }),
+            Expr::Ident(name, span) => self.env.get(name).ok_or_else(|| RuntimeError {
+                message: format!("unknown identifier '{}'", name),
+                span: Some(*span),
+            }),
+            Expr::Block(b) => match self.eval_block(b)? {
+                EvalFlow::Value(v) => Ok(v),
+                EvalFlow::Return(v) => Ok(v),
+            },
+            Expr::If(i) => {
+                for (cond, block) in &i.branches {
+                    let cv = self.eval_expr(cond)?;
+                    if as_bool(&cv) {
+                        return match self.eval_block(block)? {
+                            EvalFlow::Value(v) => Ok(v),
+                            EvalFlow::Return(v) => Ok(v),
+                        };
+                    }
+                }
+                if let Some(else_block) = &i.else_block {
+                    match self.eval_block(else_block)? {
+                        EvalFlow::Value(v) => Ok(v),
+                        EvalFlow::Return(v) => Ok(v),
+                    }
+                } else {
+                    Ok(Value::Unit)
+                }
+            }
+            Expr::Match(m) => {
+                let value = self.eval_expr(&m.expr)?;
+                for arm in &m.arms {
+                    if let Some(bindings) = self.try_match(&arm.pattern, &value) {
+                        self.env.push();
+                        for (k, v) in bindings {
+                            self.env.define(k, v);
+                        }
+                        let out = self.eval_expr(&arm.expr);
+                        self.env.pop();
+                        return out;
+                    }
+                }
+                Err(RuntimeError {
+                    message: "non-exhaustive match at runtime".into(),
+                    span: Some(m.span),
+                })
+            }
+            Expr::FnCall(call) => {
+                let args = call
+                    .args
+                    .iter()
+                    .map(|a| self.eval_expr(a))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.call_function(&call.name, args, call.span)
+            }
+            Expr::MethodCall(call) => {
+                let target = self.eval_expr(&call.target)?;
+                let args = call
+                    .args
+                    .iter()
+                    .map(|a| self.eval_expr(a))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.call_method(target, &call.method, args, call.span)
+            }
+            Expr::FieldAccess { target, field, span } => {
+                let obj = self.eval_expr(target)?;
+                match obj {
+                    Value::Record { fields, .. } => fields.get(field).cloned().ok_or_else(|| RuntimeError {
+                        message: format!("missing field '{}'", field),
+                        span: Some(*span),
+                    }),
+                    _ => Err(RuntimeError {
+                        message: "field access on non-record value".into(),
+                        span: Some(*span),
+                    }),
+                }
+            }
+            Expr::Index {
+                target,
+                index,
+                span,
+            } => {
+                let t = self.eval_expr(target)?;
+                let i = self.eval_expr(index)?;
+                match (t, i) {
+                    (Value::List(items), Value::Int(idx)) => items
+                        .get(idx as usize)
+                        .cloned()
+                        .ok_or_else(|| RuntimeError {
+                            message: format!("list index {} out of bounds", idx),
+                            span: Some(*span),
+                        }),
+                    (Value::Tuple(items), Value::Int(idx)) => items
+                        .get(idx as usize)
+                        .cloned()
+                        .ok_or_else(|| RuntimeError {
+                            message: format!("tuple index {} out of bounds", idx),
+                            span: Some(*span),
+                        }),
+                    _ => Err(RuntimeError {
+                        message: "indexing requires list/tuple and int index".into(),
+                        span: Some(*span),
+                    }),
+                }
+            }
+            Expr::Pipeline {
+                left,
+                right,
+                span,
+            } => {
+                let left_v = self.eval_expr(left)?;
+                match &**right {
+                    Expr::FnCall(call) => {
+                        let mut args = vec![left_v];
+                        let mut rhs_args = call
+                            .args
+                            .iter()
+                            .map(|a| self.eval_expr(a))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        args.append(&mut rhs_args);
+                        self.call_function(&call.name, args, call.span)
+                    }
+                    Expr::MethodCall(call) => {
+                        let mut args = vec![left_v];
+                        let mut rhs_args = call
+                            .args
+                            .iter()
+                            .map(|a| self.eval_expr(a))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        args.append(&mut rhs_args);
+                        self.call_function(&call.method, args, call.span)
+                    }
+                    Expr::Ident(name, _) => self.call_function(name, vec![left_v], *span),
+                    _ => Err(RuntimeError {
+                        message: "pipeline RHS must be callable".into(),
+                        span: Some(*span),
+                    }),
+                }
+            }
+            Expr::Binary {
+                left,
+                op,
+                right,
+                span,
+            } => {
+                let l = self.eval_expr(left)?;
+                let r = self.eval_expr(right)?;
+                self.eval_binary(l, *op, r, *span)
+            }
+            Expr::Unary { op, expr, span } => {
+                let v = self.eval_expr(expr)?;
+                match op {
+                    UnaryOp::Neg => match v {
+                        Value::Int(i) => Ok(Value::Int(-i)),
+                        Value::Float(f) => Ok(Value::Float(-f)),
+                        _ => Err(RuntimeError {
+                            message: "unary '-' requires int or float".into(),
+                            span: Some(*span),
+                        }),
+                    },
+                    UnaryOp::Not => Ok(Value::Bool(!as_bool(&v))),
+                }
+            }
+            Expr::Closure(_) => Err(RuntimeError {
+                message: "closure runtime values are not implemented in Phase 2".into(),
+                span: Some(expr.span()),
+            }),
+            Expr::RecordLiteral(r) => {
+                let mut fields = HashMap::new();
+                for (name, e, _) in &r.fields {
+                    fields.insert(name.clone(), self.eval_expr(e)?);
+                }
+                Ok(Value::Record {
+                    name: r.name.clone(),
+                    fields,
+                })
+            }
+            Expr::ListLiteral { elems, .. } => Ok(Value::List(
+                elems
+                    .iter()
+                    .map(|e| self.eval_expr(e))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Expr::TupleLiteral { elems, .. } => Ok(Value::Tuple(
+                elems
+                    .iter()
+                    .map(|e| self.eval_expr(e))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            Expr::Return { value, .. } => {
+                if let Some(v) = value {
+                    self.eval_expr(v)
+                } else {
+                    Ok(Value::Unit)
+                }
+            }
+            Expr::ErrorProp { expr, span } => {
+                let v = self.eval_expr(expr)?;
+                match v {
+                    Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                        Ok(payload[0].clone())
+                    }
+                    Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                        Err(RuntimeError {
+                            message: format!("error propagation: {:?}", payload[0]),
+                            span: Some(*span),
+                        })
+                    }
+                    other => Ok(other),
+                }
+            }
+        }
+    }
+
+    fn call_function(&mut self, name: &str, args: Vec<Value>, span: Span) -> Result<Value, RuntimeError> {
+        // stdlib builtins
+        if let Some(v) = self.call_builtin(name, &args)? {
+            return Ok(v);
+        }
+
+        // tool declaration execution
+        if self.tools.contains_key(name) {
+            return self.call_tool(name, args, span);
+        }
+
+        let Some(f) = self.functions.get(name).cloned() else {
+            return Err(RuntimeError {
+                message: format!("unknown function '{}'", name),
+                span: Some(span),
+            });
+        };
+
+        if f.params.len() != args.len() {
+            return Err(RuntimeError {
+                message: format!(
+                    "function '{}' expected {} arguments, got {}",
+                    name,
+                    f.params.len(),
+                    args.len()
+                ),
+                span: Some(span),
+            });
+        }
+
+        self.env.push();
+        for (p, a) in f.params.iter().zip(args.into_iter()) {
+            self.env.define(p.clone(), a);
+        }
+
+        let out = match self.eval_block(&f.body)? {
+            EvalFlow::Value(v) => v,
+            EvalFlow::Return(v) => v,
+        };
+
+        self.env.pop();
+        Ok(out)
+    }
+
+    fn call_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, RuntimeError> {
+        match name {
+            "print" | "println" => {
+                let msg = args.get(0).map(display_value).unwrap_or_else(String::new);
+                if name == "println" {
+                    println!("{msg}");
+                } else {
+                    print!("{msg}");
+                }
+                self.log_effect(name, "IO", json!(args), json!(Value::Unit), 0)?;
+                Ok(Some(Value::Unit))
+            }
+            "type_of" => {
+                let ty = if let Some(v) = args.first() {
+                    value_type_name(v)
+                } else {
+                    "Unit".into()
+                };
+                Ok(Some(Value::String(ty)))
+            }
+            "now_unix" => {
+                let val = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or(Duration::from_secs(0))
+                    .as_secs() as i64;
+                self.log_effect(name, "Time", json!(args), json!(val), 0)?;
+                Ok(Some(Value::Int(val)))
+            }
+            "now_millis" => {
+                let val = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or(Duration::from_secs(0))
+                    .as_millis() as i64;
+                self.log_effect(name, "Time", json!(args), json!(val), 0)?;
+                Ok(Some(Value::Int(val)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn call_method(
+        &mut self,
+        target: Value,
+        method: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
+        match method {
+            "unwrap" => match target {
+                Value::Variant { name, payload } if name == "Confident" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                _ => Err(RuntimeError {
+                    message: "unwrap expects Confident(value)".into(),
+                    span: Some(span),
+                }),
+            },
+            "candidates" => match target {
+                Value::Variant { name, payload } if name == "Uncertain" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                _ => Err(RuntimeError {
+                    message: "candidates expects Uncertain(list)".into(),
+                    span: Some(span),
+                }),
+            },
+            "top" => match target {
+                Value::Variant { name, payload } if name == "Uncertain" && payload.len() == 1 => {
+                    if let Value::List(items) = &payload[0] {
+                        if let Some(first) = items.first() {
+                            Ok(Value::Variant {
+                                name: "Some".into(),
+                                payload: vec![first.clone()],
+                            })
+                        } else {
+                            Ok(Value::Variant {
+                                name: "None".into(),
+                                payload: vec![],
+                            })
+                        }
+                    } else {
+                        Err(RuntimeError {
+                            message: "Uncertain payload must be list".into(),
+                            span: Some(span),
+                        })
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "top expects Uncertain(list)".into(),
+                    span: Some(span),
+                }),
+            },
+            "map" if args.len() == 1 => {
+                // map with first arg being function-like is not implemented; keep explicit for phase 2.
+                Err(RuntimeError {
+                    message: "higher-order method calls are not implemented yet".into(),
+                    span: Some(span),
+                })
+            }
+            _ => Err(RuntimeError {
+                message: format!("unsupported method '{}'", method),
+                span: Some(span),
+            }),
+        }
+    }
+
+    fn call_tool(&mut self, tool_name: &str, args: Vec<Value>, span: Span) -> Result<Value, RuntimeError> {
+        let Some(tool) = self.tools.get(tool_name).cloned() else {
+            return Err(RuntimeError {
+                message: format!("unknown tool '{}'", tool_name),
+                span: Some(span),
+            });
+        };
+
+        let started = Instant::now();
+
+        // mock option: call mock function if configured
+        for option in &tool.decl.options {
+            if let ToolOption::Mock(mock_name, _) = option {
+                let out = self.call_function(mock_name, args.clone(), span)?;
+                self.log_effect(
+                    tool_name,
+                    "ToolCall",
+                    json!(args),
+                    json!({"mock": mock_name, "result": out}),
+                    started.elapsed().as_millis() as i64,
+                )?;
+                return Ok(out);
+            }
+        }
+
+        let placeholder = placeholder_for_type(&tool.decl.ret_ty);
+        self.log_effect(
+            tool_name,
+            "ToolCall",
+            json!(args),
+            json!({"stub": true, "result": placeholder}),
+            started.elapsed().as_millis() as i64,
+        )?;
+
+        Ok(placeholder)
+    }
+
+    fn log_effect(
+        &mut self,
+        fn_name: &str,
+        effect: &str,
+        inputs: JsonValue,
+        output: JsonValue,
+        duration_ms: i64,
+    ) -> Result<(), RuntimeError> {
+        self.seq += 1;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as i64;
+
+        let entry = JournalEntry {
+            id: format!("{}:{}", self.run_id, self.seq),
+            run_id: self.run_id.clone(),
+            seq: self.seq,
+            timestamp,
+            effect: effect.to_string(),
+            fn_name: fn_name.to_string(),
+            module: self.module_name.clone(),
+            inputs,
+            output,
+            duration_ms,
+        };
+
+        let line = serde_json::to_string(&entry).map_err(|e| RuntimeError {
+            message: format!("failed to serialize journal entry: {e}"),
+            span: None,
+        })?;
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.journal_path)
+            .map_err(|e| RuntimeError {
+                message: format!("failed to open journal file '{}': {e}", self.journal_path),
+                span: None,
+            })?;
+
+        writeln!(file, "{line}").map_err(|e| RuntimeError {
+            message: format!("failed to write journal entry: {e}"),
+            span: None,
+        })
+    }
+
+    fn eval_binary(
+        &self,
+        left: Value,
+        op: BinaryOp,
+        right: Value,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
+        match op {
+            BinaryOp::Add => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + b as f64)),
+                _ => type_error(span, "'+' expects numeric operands"),
+            },
+            BinaryOp::Sub => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 - b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a - b as f64)),
+                _ => type_error(span, "'-' expects numeric operands"),
+            },
+            BinaryOp::Mul => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 * b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a * b as f64)),
+                _ => type_error(span, "'*' expects numeric operands"),
+            },
+            BinaryOp::Div => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a / b)),
+                (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
+                (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 / b)),
+                (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a / b as f64)),
+                _ => type_error(span, "'/' expects numeric operands"),
+            },
+            BinaryOp::Rem => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+                _ => type_error(span, "'%' expects integer operands"),
+            },
+            BinaryOp::Eq => Ok(Value::Bool(left == right)),
+            BinaryOp::Ne => Ok(Value::Bool(left != right)),
+            BinaryOp::Lt => cmp_bool(left, right, span, |a, b| a < b),
+            BinaryOp::Gt => cmp_bool(left, right, span, |a, b| a > b),
+            BinaryOp::Le => cmp_bool(left, right, span, |a, b| a <= b),
+            BinaryOp::Ge => cmp_bool(left, right, span, |a, b| a >= b),
+            BinaryOp::And => Ok(Value::Bool(as_bool(&left) && as_bool(&right))),
+            BinaryOp::Or => Ok(Value::Bool(as_bool(&left) || as_bool(&right))),
+            BinaryOp::Concat => Ok(Value::String(format!(
+                "{}{}",
+                display_value(&left),
+                display_value(&right)
+            ))),
+        }
+    }
+
+    fn try_match(&self, pattern: &Pattern, value: &Value) -> Option<HashMap<String, Value>> {
+        let mut bindings = HashMap::new();
+        if self.try_match_into(pattern, value, &mut bindings) {
+            Some(bindings)
+        } else {
+            None
+        }
+    }
+
+    fn try_match_into(
+        &self,
+        pattern: &Pattern,
+        value: &Value,
+        bindings: &mut HashMap<String, Value>,
+    ) -> bool {
+        match pattern {
+            Pattern::Wildcard(_) => true,
+            Pattern::Literal(l, _) => match (l, value) {
+                (Literal::Int(a), Value::Int(b)) => a == b,
+                (Literal::Float(a), Value::Float(b)) => a.parse::<f64>().ok() == Some(*b),
+                (Literal::String(a), Value::String(b)) => a == b,
+                (Literal::Bool(a), Value::Bool(b)) => a == b,
+                _ => false,
+            },
+            Pattern::Ident(name, _) => {
+                bindings.insert(name.clone(), value.clone());
+                true
+            }
+            Pattern::Tuple(parts, _) => {
+                if let Value::Tuple(values) = value {
+                    if parts.len() != values.len() {
+                        return false;
+                    }
+                    for (p, v) in parts.iter().zip(values.iter()) {
+                        if !self.try_match_into(p, v, bindings) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Pattern::EnumTuple { name, elems, .. } => {
+                if let Value::Variant { name: vn, payload } = value {
+                    if name != vn || elems.len() != payload.len() {
+                        return false;
+                    }
+                    for (p, v) in elems.iter().zip(payload.iter()) {
+                        if !self.try_match_into(p, v, bindings) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Pattern::EnumStruct { .. } | Pattern::Record { .. } => false,
+            Pattern::Or(left, right, _) => {
+                let mut left_bindings = bindings.clone();
+                if self.try_match_into(left, value, &mut left_bindings) {
+                    *bindings = left_bindings;
+                    return true;
+                }
+
+                let mut right_bindings = bindings.clone();
+                if self.try_match_into(right, value, &mut right_bindings) {
+                    *bindings = right_bindings;
+                    return true;
+                }
+
+                false
+            }
+        }
+    }
+}
+
+pub fn run(program: &Program) -> Result<Value, RuntimeError> {
+    Interpreter::new(program.module.as_ref().map(|m| m.path.join("."))).run_program(program)
+}
+
+fn type_error<T>(span: Span, msg: &str) -> Result<T, RuntimeError> {
+    Err(RuntimeError {
+        message: msg.to_string(),
+        span: Some(span),
+    })
+}
+
+fn as_bool(v: &Value) -> bool {
+    match v {
+        Value::Bool(b) => *b,
+        Value::Int(i) => *i != 0,
+        Value::Float(f) => *f != 0.0,
+        Value::String(s) => !s.is_empty(),
+        Value::Unit => false,
+        Value::List(xs) => !xs.is_empty(),
+        Value::Tuple(xs) => !xs.is_empty(),
+        Value::Record { .. } => true,
+        Value::Variant { .. } => true,
+    }
+}
+
+fn display_value(v: &Value) -> String {
+    match v {
+        Value::Unit => "()".into(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::String(s) => s.clone(),
+        Value::List(xs) => format!("{:?}", xs),
+        Value::Tuple(xs) => format!("{:?}", xs),
+        Value::Record { name, fields } => format!("{} {:?}", name, fields),
+        Value::Variant { name, payload } => format!("{}{:?}", name, payload),
+    }
+}
+
+fn value_type_name(v: &Value) -> String {
+    match v {
+        Value::Unit => "Unit".into(),
+        Value::Int(_) => "Int".into(),
+        Value::Float(_) => "Float".into(),
+        Value::Bool(_) => "Bool".into(),
+        Value::String(_) => "String".into(),
+        Value::List(_) => "List".into(),
+        Value::Tuple(_) => "Tuple".into(),
+        Value::Record { name, .. } => name.clone(),
+        Value::Variant { name, .. } => name.clone(),
+    }
+}
+
+fn cmp_bool<F>(left: Value, right: Value, span: Span, f: F) -> Result<Value, RuntimeError>
+where
+    F: Fn(f64, f64) -> bool,
+{
+    let Some(l) = as_number(&left) else {
+        return type_error(span, "comparison requires numeric operands");
+    };
+    let Some(r) = as_number(&right) else {
+        return type_error(span, "comparison requires numeric operands");
+    };
+    Ok(Value::Bool(f(l, r)))
+}
+
+fn as_number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(i) => Some(*i as f64),
+        Value::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
+fn placeholder_for_type(ty: &TypeExpr) -> Value {
+    match ty {
+        TypeExpr::Primitive(p, _) => match p {
+            PrimitiveType::Int => Value::Int(0),
+            PrimitiveType::Float => Value::Float(0.0),
+            PrimitiveType::Bool => Value::Bool(false),
+            PrimitiveType::String => Value::String("<stub>".into()),
+            PrimitiveType::Bytes => Value::String("<bytes-stub>".into()),
+            PrimitiveType::Unit => Value::Unit,
+        },
+        TypeExpr::Dynamic(_) => Value::String("<dynamic-stub>".into()),
+        TypeExpr::Tuple { elems, .. } => {
+            Value::Tuple(elems.iter().map(placeholder_for_type).collect())
+        }
+        TypeExpr::Named { name, .. } => Value::Variant {
+            name: name.clone(),
+            payload: vec![],
+        },
+        TypeExpr::Function { .. } => Value::String("<function-stub>".into()),
+        TypeExpr::Generic { name, args, .. } => match name.as_str() {
+            "Result" if args.len() == 2 => Value::Variant {
+                name: "Ok".into(),
+                payload: vec![placeholder_for_type(&args[0])],
+            },
+            "Option" if args.len() == 1 => Value::Variant {
+                name: "Some".into(),
+                payload: vec![placeholder_for_type(&args[0])],
+            },
+            "List" if args.len() == 1 => Value::List(vec![placeholder_for_type(&args[0])]),
+            "Confident" if args.len() == 1 => Value::Variant {
+                name: "Confident".into(),
+                payload: vec![placeholder_for_type(&args[0])],
+            },
+            "Uncertain" if args.len() == 1 => Value::Variant {
+                name: "Uncertain".into(),
+                payload: vec![Value::List(vec![placeholder_for_type(&args[0])])],
+            },
+            "Scored" if args.len() == 1 => {
+                let mut fields = HashMap::new();
+                fields.insert("value".into(), placeholder_for_type(&args[0]));
+                fields.insert("score".into(), Value::Float(0.5));
+                Value::Record {
+                    name: "Scored".into(),
+                    fields,
+                }
+            }
+            _ => Value::Variant {
+                name: name.clone(),
+                payload: vec![],
+            },
+        },
+    }
 }

@@ -8,3 +8,5 @@ repository.workspace = true
 
 [dependencies]
 lace-ast = { path = "../lace-ast" }
+serde.workspace = true
+serde_json.workspace = true

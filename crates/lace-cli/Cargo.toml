@@ -16,4 +16,6 @@ clap.workspace = true
 lace-lexer = { path = "../lace-lexer" }
 lace-parser = { path = "../lace-parser" }
 lace-types = { path = "../lace-types" }
+lace-effects = { path = "../lace-effects" }
+lace-interp = { path = "../lace-interp" }
 lace-ast = { path = "../lace-ast" }
