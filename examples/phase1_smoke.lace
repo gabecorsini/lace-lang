@@ -1,0 +1,8 @@
+fn add(a: Int, b: Int) -> Int [Pure] {
+    a + b
+}
+
+fn main() -> Int [Pure] {
+    let x = add(2, 3)
+    x
+}

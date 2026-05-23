@@ -1,0 +1,19 @@
+[package]
+name = "lace-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lace"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+lace-lexer = { path = "../lace-lexer" }
+lace-parser = { path = "../lace-parser" }
+lace-types = { path = "../lace-types" }
+lace-ast = { path = "../lace-ast" }

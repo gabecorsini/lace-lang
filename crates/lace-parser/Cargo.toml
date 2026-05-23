@@ -1,0 +1,12 @@
+[package]
+name = "lace-parser"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+lace-ast = { path = "../lace-ast" }
+lace-lexer = { path = "../lace-lexer" }
+thiserror.workspace = true
