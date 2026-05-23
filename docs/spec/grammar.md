@@ -78,11 +78,14 @@ param_list       = param { "," param } [ "," ] ;
 param            = IDENT ":" type ;
 
 generic_params   = "<" generic_param { "," generic_param } ">" ;
-generic_param    = TYPE_IDENT [ ":" trait_bound { "+" trait_bound } ] ;
+generic_param    = TYPE_IDENT [ ":" trait_bound { "+" trait_bound } ]
+                 | IDENT ;    (* lowercase = effect variable, e.g. efx *)
 trait_bound      = TYPE_IDENT ;
 
 effect_ann       = "[" effect { "," effect } "]" ;
-effect           = "Pure" | "IO" | "Mut" | "ToolCall" ;
+effect           = "Pure" | "IO" | "Mut" | "ToolCall" | "Time" | "Rand" | IDENT ;
+(* IDENT form is used for effect variables in polymorphic functions, e.g. [efx] *)
+(* Time and Rand are sub-tags of IO. A function declaring [Time] is implicitly [IO]. *)
 ```
 
 ### 3.2 Tool Declarations

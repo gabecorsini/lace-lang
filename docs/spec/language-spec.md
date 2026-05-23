@@ -108,7 +108,9 @@ Every function in Lace carries an effect annotation declaring what side-effects 
 |------------|----------------------------------------------------------------|
 | `Pure`     | No side effects. Deterministic. Safe to memoize/replay.        |
 | `IO`       | Reads or writes to file system, network, or environment.       |
-| `Mut`      | Mutates state outside the function's own scope.                |
+| `Time`     | Reads the clock. Sub-tag of `IO`; journaled for replay.        |
+| `Rand`     | Consumes randomness. Sub-tag of `IO`; journaled for replay.    |
+| `Mut`      | Mutates external state outside the function's own scope.       |
 | `ToolCall` | Invokes an external `tool` declaration.                        |
 
 Effect annotations are declared in brackets after the parameter list:
@@ -174,7 +176,7 @@ fn greet(name: String) -> String [Pure] {
 }
 ```
 
-The return type is mandatory for non-trivial functions. The effect annotation is mandatory for all functions except those inferred as `Pure` (inference is allowed but explicit is preferred — see open questions).
+The return type is mandatory for non-trivial functions. The effect annotation is mandatory for all named functions. Closures may have effects inferred (inference is allowed but explicit is preferred).
 
 Anonymous functions (closures):
 

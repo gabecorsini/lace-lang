@@ -112,6 +112,24 @@ let resolved = result
 
 ---
 
+## 2.5 Scored\<T\>
+
+Helper type for attaching a confidence score to any value. Use with `Uncertain` when ranking is important.
+
+```lace
+record Scored<T> {
+    value: T,
+    score: Float,
+}
+```
+
+Example:
+```lace
+let result: Uncertain<[Scored<Category>]> = classify(input);
+```
+
+---
+
 ## 3. Tool Primitives (`lace.stdlib.tool`)
 
 ### 3.1 ToolError
@@ -286,8 +304,8 @@ fn env_var(name: String) -> Option<String> [IO]
 fn env_var_required(name: String) -> Result<String, EnvError> [IO]
 
 -- Clock
-fn now_unix() -> Int [IO]           -- seconds since epoch
-fn now_millis() -> Int [IO]         -- milliseconds since epoch
+fn now_unix() -> Int [Time]         -- seconds since epoch (Time implies IO; journaled for deterministic replay)
+fn now_millis() -> Int [Time]       -- milliseconds since epoch (Time implies IO)
 fn sleep(duration: Duration) -> Unit [IO]
 
 -- Stdin / Stdout

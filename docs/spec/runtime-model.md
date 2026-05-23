@@ -156,7 +156,7 @@ JournalEntry {
     run_id: String,
     seq: Int,            -- monotonically increasing
     timestamp: Int,      -- unix milliseconds
-    effect: EffectTag,   -- IO | ToolCall
+    effect: EffectTag,   -- IO | ToolCall | Time | Rand (Time and Rand are IO sub-tags; journaled separately for deterministic replay)
     fn_name: String,
     module: String,
     inputs: JSON,        -- serialized inputs

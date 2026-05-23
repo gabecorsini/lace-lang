@@ -48,18 +48,33 @@ An `IO` function:
 ### 2.3 Mut
 
 ```lace
-fn push<T>(list: mut List<T>, item: T) -> Unit [Mut] { .. }
-fn increment(counter: mut Int) -> Unit [Mut] { counter = counter + 1 }
+fn register(registry: mut Map<String, Handler>, key: String, h: Handler) -> Unit [Mut] { .. }
+fn update_counter(store: mut GlobalStore, delta: Int) -> Unit [Mut] { .. }
 ```
 
 A `Mut` function:
-- Mutates state that outlives the function call — either a `mut` binding passed by reference, or a shared data structure
+- Mutates **external** state that outlives the function call — a shared data store, a global registry, or an externally-managed structure passed by mutable reference
 - Is tracked by the runtime for state isolation during replay
 - Cannot be called in a `pure { .. }` block
 
-Note: local mutation (modifying a value before returning it) that does not escape the function is NOT `Mut`. Only observable external mutation is.
+Note: Lace values are immutable. `mut let` bindings allow rebinding the variable to a new value but do not allow in-place mutation of data structures. Functions that appear to "update" a collection (e.g. `push`, `insert`) return a new value. The `[Mut]` effect is reserved exclusively for observable mutation of external state.
 
-### 2.4 ToolCall
+### 2.4 Time and Rand (IO sub-tags)
+
+```lace
+fn now_unix() -> Int [Time]
+fn now_millis() -> Int [Time]
+fn random_float() -> Float [Rand]
+fn random_int(min: Int, max: Int) -> Int [Rand]
+```
+
+`Time` and `Rand` are sub-tags of `IO`. A function declaring `[Time]` is also implicitly `[IO]`. These sub-tags exist to give the runtime's journal enough information to replay deterministically:
+- `Time` calls are journaled separately; replay substitutes the recorded timestamp
+- `Rand` calls are journaled separately; replay substitutes the recorded value
+
+User code rarely declares `[Time]` or `[Rand]` directly. Only stdlib functions use them. Callers that invoke a `[Time]` or `[Rand]` function must declare at minimum `[IO]`. The sub-tag distinction matters for the journal, not for the caller's effect obligations.
+
+### 2.5 ToolCall
 
 ```lace
 tool web_search(query: String) -> Result<List<SearchResult>, ToolError>
@@ -123,7 +138,7 @@ fn apply<A, B, efx>(f: fn(A) -> B [efx], value: A) -> B [efx] {
 
 Effect variables (`efx` above) are quantified like type variables. This allows higher-order functions to remain effect-correct without hardcoding effect sets.
 
-This is an advanced feature. The initial implementation may restrict effect polymorphism to a set of predefined patterns (e.g. `|efx| where efx: subset of {IO, ToolCall, Mut, Pure}`). See open-questions.md.
+This is supported in v0.1 via predefined effect variables (lowercase identifiers like `efx`). Effect variables are declared alongside type parameters: `<A, B, efx>`. The initial implementation may restrict composition to a fixed set of patterns. See open-questions.md Q2 (resolved: predefined effect variables).
 
 ---
 
@@ -209,4 +224,4 @@ let g = |path: String| { read_file(path) }  // inferred [IO]
 
 Named functions must be explicit. Explicit annotations are preferred on all functions, including closures, for readability and maintainability. The compiler will warn on inferred effects in non-trivial closures.
 
-See open-questions.md for the debate on full effect inference.
+See open-questions.md Q1 (resolved: explicit annotations required).
