@@ -1,7 +1,44 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use lace_ast::*;
 use thiserror::Error;
+
+/// Return the closest name from `candidates` to `name` using Levenshtein distance,
+/// or `None` if no candidate is within edit-distance 3.
+pub fn did_you_mean<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> Option<String> {
+    let mut best: Option<(usize, &str)> = None;
+    for candidate in candidates {
+        let d = levenshtein(name, candidate);
+        if d <= 3 {
+            match best {
+                None => best = Some((d, candidate)),
+                Some((bd, _)) if d < bd => best = Some((d, candidate)),
+                _ => {}
+            }
+        }
+    }
+    best.map(|(_, s)| s.to_string())
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+    for i in 0..=m { dp[i][0] = i; }
+    for j in 0..=n { dp[0][j] = j; }
+    for i in 1..=m {
+        for j in 1..=n {
+            dp[i][j] = if a[i-1] == b[j-1] {
+                dp[i-1][j-1]
+            } else {
+                1 + dp[i-1][j].min(dp[i][j-1]).min(dp[i-1][j-1])
+            };
+        }
+    }
+    dp[m][n]
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
@@ -28,36 +65,37 @@ pub enum Type {
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum TypeError {
-    #[error("unknown identifier '{name}' at {span_start}..{span_end}")]
+    #[error("[E001] unknown identifier '{name}' at {span_start}..{span_end}{}", suggestion.as_deref().map(|s| format!(" — did you mean '{s}'?")).unwrap_or_default())]
     UnknownIdentifier {
         name: String,
         span_start: usize,
         span_end: usize,
+        suggestion: Option<String>,
     },
-    #[error("type mismatch at {span_start}..{span_end}: expected {expected:?}, found {found:?}")]
+    #[error("[E002] type mismatch at {span_start}..{span_end}: expected {expected:?}, found {found:?}")]
     Mismatch {
         expected: Type,
         found: Type,
         span_start: usize,
         span_end: usize,
     },
-    #[error("unknown function '{name}' at {span_start}..{span_end}")]
+    #[error("[E001] unknown function '{name}' at {span_start}..{span_end}")]
     UnknownFunction {
         name: String,
         span_start: usize,
         span_end: usize,
     },
-    #[error("unknown record type '{name}'")]
+    #[error("[E004] unknown record type '{name}'")]
     UnknownRecordType { name: String },
-    #[error("invalid pattern at {span_start}..{span_end}: {message}")]
+    #[error("[E002] invalid pattern at {span_start}..{span_end}: {message}")]
     InvalidPattern {
         message: String,
         span_start: usize,
         span_end: usize,
     },
-    #[error("invalid tool declaration '{name}': {message}")]
+    #[error("[E005] invalid tool declaration '{name}': {message}")]
     InvalidToolDecl { name: String, message: String },
-    #[error("non-exhaustive match on '{enum_name}': missing variant(s) {missing:?} at {span_start}..{span_end}")]
+    #[error("[E002] non-exhaustive match on '{enum_name}': missing variant(s) {missing:?} at {span_start}..{span_end}")]
     NonExhaustiveMatch {
         enum_name: String,
         missing: Vec<String>,
@@ -66,12 +104,54 @@ pub enum TypeError {
     },
 }
 
+impl TypeError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            TypeError::UnknownIdentifier { .. } | TypeError::UnknownFunction { .. } => "E001",
+            TypeError::Mismatch { .. } | TypeError::InvalidPattern { .. } | TypeError::NonExhaustiveMatch { .. } => "E002",
+            TypeError::UnknownRecordType { .. } => "E004",
+            TypeError::InvalidToolDecl { .. } => "E005",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypeWarning {
+    /// W001: variable defined but never used
+    UnusedVariable {
+        name: String,
+        span_start: usize,
+        span_end: usize,
+    },
+}
+
+impl TypeWarning {
+    pub fn code(&self) -> &'static str {
+        "W001"
+    }
+}
+
+impl std::fmt::Display for TypeWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeWarning::UnusedVariable { name, .. } => {
+                write!(f, "[W001] unused variable '{name}'")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Scope {
     vars: HashMap<String, Type>,
 }
 
 pub fn check_program(program: &Program) -> Vec<TypeError> {
+    let (errors, _warnings) = check_program_full(program);
+    errors
+}
+
+pub fn check_program_full(program: &Program) -> (Vec<TypeError>, Vec<TypeWarning>) {
     let mut checker = Checker::new();
     // Register imported module names as Dynamic so field access type-checks pass
     for import in &program.imports {
@@ -81,7 +161,20 @@ pub fn check_program(program: &Program) -> Vec<TypeError> {
     }
     checker.collect_signatures(program);
     checker.check(program);
-    checker.errors
+
+    // Build W001 warnings: let bindings never referenced
+    let mut warnings = Vec::new();
+    for (name, span_start, span_end) in &checker.let_bindings {
+        if !checker.used_idents.contains(name.as_str()) {
+            warnings.push(TypeWarning::UnusedVariable {
+                name: name.clone(),
+                span_start: *span_start,
+                span_end: *span_end,
+            });
+        }
+    }
+
+    (checker.errors, warnings)
 }
 
 struct Checker {
@@ -90,6 +183,10 @@ struct Checker {
     record_types: HashMap<String, BTreeMap<String, Type>>,
     enum_variants: HashMap<String, Vec<String>>,
     errors: Vec<TypeError>,
+    /// All let-binding names with their span, for W001 tracking
+    let_bindings: Vec<(String, usize, usize)>,
+    /// All identifier names that were looked up (referenced), for W001 tracking
+    used_idents: HashSet<String>,
 }
 
 impl Checker {
@@ -102,6 +199,8 @@ impl Checker {
             record_types: HashMap::new(),
             enum_variants: HashMap::new(),
             errors: Vec::new(),
+            let_bindings: Vec::new(),
+            used_idents: HashSet::new(),
         };
         checker.install_prelude();
         checker
@@ -526,6 +625,8 @@ impl Checker {
                 } else {
                     self.define(s.name.clone(), inferred);
                 }
+                // Track for W001 unused variable detection
+                self.let_bindings.push((s.name.clone(), s.span.start, s.span.end));
             }
             Stmt::Assign(a) => {
                 let expected = self.lookup(&a.name).unwrap_or(Type::Unknown);
@@ -581,6 +682,7 @@ impl Checker {
                 Literal::Bool(_) => Type::Bool,
             },
             Expr::Ident(name, span) => {
+                self.used_idents.insert(name.clone());
                 if let Some(t) = self.lookup(name) {
                     t
                 } else if self.fn_sigs.contains_key(name.as_str()) {
@@ -588,10 +690,18 @@ impl Checker {
                     let (params, ret) = self.fn_sigs[name.as_str()].clone();
                     Type::Fn(params, Box::new(ret))
                 } else {
+                    // Collect all known names for did_you_mean
+                    let scope_names: Vec<String> = self.scopes.iter()
+                        .flat_map(|s| s.vars.keys().cloned())
+                        .collect();
+                    let fn_names: Vec<String> = self.fn_sigs.keys().cloned().collect();
+                    let all_names: Vec<String> = scope_names.into_iter().chain(fn_names).collect();
+                    let suggestion = did_you_mean(name, all_names.iter());
                     self.errors.push(TypeError::UnknownIdentifier {
                         name: name.clone(),
                         span_start: span.start,
                         span_end: span.end,
+                        suggestion,
                     });
                     Type::Unknown
                 }

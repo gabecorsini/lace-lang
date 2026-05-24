@@ -12,3 +12,7 @@ lace-parser = { path = "../lace-parser" }
 serde.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
+
+[dev-dependencies]
+lace-types = { path = "../lace-types" }
+

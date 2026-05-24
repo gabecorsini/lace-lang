@@ -14,6 +14,8 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 colored.workspace = true
+serde.workspace = true
+toml.workspace = true
 lace-lexer = { path = "../lace-lexer" }
 lace-parser = { path = "../lace-parser" }
 lace-types = { path = "../lace-types" }

@@ -1,0 +1,13 @@
+module utils
+
+fn greet(name: String) -> String [Pure] {
+    "Hello, " ++ name ++ "!"
+}
+
+fn add(a: Int, b: Int) -> Int [Pure] {
+    a + b
+}
+
+fn double(x: Int) -> Int [Pure] {
+    x * 2
+}

@@ -1,0 +1,12 @@
+import utils
+
+fn main() [IO] {
+    let msg = utils.greet("Lace")
+    println(msg)
+
+    let sum = utils.add(10, 32)
+    println("10 + 32 = " ++ to_string(sum))
+
+    let d = utils.double(21)
+    println("double(21) = " ++ to_string(d))
+}
