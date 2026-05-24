@@ -407,6 +407,48 @@ impl Checker {
             "File.exists".into(),
             (vec![Type::String], Type::Bool),
         );
+        // Http stdlib
+        self.scopes[0].vars.insert("Http".into(), Type::Dynamic);
+        self.fn_sigs.insert(
+            "Http.get".into(),
+            (vec![Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Http.post".into(),
+            (vec![Type::String, Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Http.post_json".into(),
+            (vec![Type::String, Type::Dynamic], Type::Dynamic),
+        );
+        // Json stdlib
+        self.scopes[0].vars.insert("Json".into(), Type::Dynamic);
+        self.fn_sigs.insert(
+            "Json.parse".into(),
+            (vec![Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Json.stringify".into(),
+            (vec![Type::Dynamic], Type::String),
+        );
+        self.fn_sigs.insert(
+            "Json.get".into(),
+            (vec![Type::Dynamic, Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Json.keys".into(),
+            (vec![Type::Dynamic], Type::List(Box::new(Type::String))),
+        );
+        // Env stdlib
+        self.scopes[0].vars.insert("Env".into(), Type::Dynamic);
+        self.fn_sigs.insert(
+            "Env.get".into(),
+            (vec![Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Env.set".into(),
+            (vec![Type::String, Type::String], Type::Unit),
+        );
     }
 
     fn collect_signatures(&mut self, program: &Program) {

@@ -97,6 +97,7 @@ struct FunctionDef {
     effects: Vec<EffectExpr>,
     body: Block,
     qualified_name: String,
+    annotations: Vec<lace_ast::Annotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -249,6 +250,9 @@ impl Interpreter {
         self.env.define("List".into(), Value::String("List".into()));
         self.env.define("File".into(), Value::String("File".into()));
         self.env.define("Map".into(), Value::String("Map".into()));
+        self.env.define("Http".into(), Value::String("Http".into()));
+        self.env.define("Json".into(), Value::String("Json".into()));
+        self.env.define("Env".into(), Value::String("Env".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -284,6 +288,9 @@ impl Interpreter {
         self.env.define("List".into(), Value::String("List".into()));
         self.env.define("File".into(), Value::String("File".into()));
         self.env.define("Map".into(), Value::String("Map".into()));
+        self.env.define("Http".into(), Value::String("Http".into()));
+        self.env.define("Json".into(), Value::String("Json".into()));
+        self.env.define("Env".into(), Value::String("Env".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -324,6 +331,7 @@ impl Interpreter {
                         effects: f.effects.clone(),
                         body: f.body.clone(),
                         qualified_name: qualified_name.clone(),
+                        annotations: f.annotations.clone(),
                     };
                     self.functions.insert(qualified_name.clone(), def.clone());
                     if self.module_name == "main" {
@@ -928,6 +936,51 @@ impl Interpreter {
             });
         }
 
+        // Extract @retry and @timeout from annotations
+        let retry_max: Option<i64> = f.annotations.iter()
+            .find(|a| a.name == "retry")
+            .and_then(|a| a.args.iter().find(|arg| arg.name == "max"))
+            .and_then(|arg| if let lace_ast::AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
+
+        let timeout_ms: Option<i64> = f.annotations.iter()
+            .find(|a| a.name == "timed")
+            .and_then(|a| a.args.iter().find(|arg| arg.name == "ms"))
+            .and_then(|arg| if let lace_ast::AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
+
+        let started = Instant::now();
+
+        // Execute once
+        let mut result = self.exec_fn_body(&f, args.clone(), span)?;
+
+        // @retry: if result is Err, retry up to max times
+        if let Some(max) = retry_max {
+            for _ in 0..max {
+                if !is_err_variant(&result) {
+                    break;
+                }
+                result = self.exec_fn_body(&f, args.clone(), span)?;
+            }
+        }
+
+        // @timeout: post-hoc check (best-effort for single-threaded interpreter)
+        if let Some(ms) = timeout_ms {
+            if started.elapsed().as_millis() as i64 > ms {
+                return Ok(Value::Variant {
+                    name: "Err".into(),
+                    payload: vec![Value::String("timeout".into())],
+                });
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn exec_fn_body(
+        &mut self,
+        f: &FunctionDef,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
         self.call_stack.push(CallFrame {
             effects: f.effects.clone(),
         });
@@ -1590,6 +1643,181 @@ impl Interpreter {
                 }),
             },
             "None" => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
+            // Http stdlib
+            "Http.get" => match args.first() {
+                Some(Value::String(url)) => {
+                    let started = Instant::now();
+                    let result = ureq::get(url).call();
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match result {
+                        Ok(resp) => {
+                            let body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.get", "Http", json!([url]), json!(body), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::String(body)],
+                            }))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            self.log_effect("Http.get", "Http", json!([url]), json!(msg), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Err".into(),
+                                payload: vec![Value::String(msg)],
+                            }))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.get expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Http.post" => match (args.first(), args.get(1)) {
+                (Some(Value::String(url)), Some(Value::String(body))) => {
+                    let started = Instant::now();
+                    let result = ureq::post(url).send_string(body);
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match result {
+                        Ok(resp) => {
+                            let resp_body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.post", "Http", json!([url, body]), json!(resp_body), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::String(resp_body)],
+                            }))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            self.log_effect("Http.post", "Http", json!([url, body]), json!(msg), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Err".into(),
+                                payload: vec![Value::String(msg)],
+                            }))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.post expects (String, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Http.post_json" => match (args.first(), args.get(1)) {
+                (Some(Value::String(url)), Some(body_val)) => {
+                    let started = Instant::now();
+                    let json_body = value_to_json(body_val).to_string();
+                    let result = ureq::post(url)
+                        .set("Content-Type", "application/json")
+                        .send_string(&json_body);
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match result {
+                        Ok(resp) => {
+                            let resp_body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.post_json", "Http", json!([url, json_body]), json!(resp_body), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::String(resp_body)],
+                            }))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            self.log_effect("Http.post_json", "Http", json!([url, json_body]), json!(msg), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Err".into(),
+                                payload: vec![Value::String(msg)],
+                            }))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.post_json expects (String, value)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            // Json stdlib
+            "Json.parse" => match args.first() {
+                Some(Value::String(s)) => {
+                    match serde_json::from_str::<JsonValue>(s) {
+                        Ok(jv) => Ok(Some(Value::Variant {
+                            name: "Ok".into(),
+                            payload: vec![json_to_lace_value(jv)],
+                        })),
+                        Err(e) => Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(e.to_string())],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Json.parse expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Json.stringify" => {
+                let val = args.first().cloned().unwrap_or(Value::Unit);
+                let json_str = value_to_json(&val).to_string();
+                Ok(Some(Value::String(json_str)))
+            }
+            "Json.get" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(m)), Some(Value::String(key))) => {
+                    Ok(Some(match m.get(key) {
+                        Some(v) => Value::Variant { name: "Some".into(), payload: vec![v.clone()] },
+                        None => Value::Variant { name: "None".into(), payload: vec![] },
+                    }))
+                }
+                _ => Err(RuntimeError {
+                    message: "Json.get expects (Map, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Json.keys" => match args.first() {
+                Some(Value::Map(m)) => {
+                    let mut keys: Vec<Value> = m.keys().map(|k| Value::String(k.clone())).collect();
+                    keys.sort_by(|a, b| cmp_values(a, b));
+                    Ok(Some(Value::List(keys)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Json.keys expects (Map)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            // Env stdlib
+            "Env.get" => match args.first() {
+                Some(Value::String(key)) => {
+                    match std::env::var(key) {
+                        Ok(val) => Ok(Some(Value::Variant {
+                            name: "Some".into(),
+                            payload: vec![Value::String(val)],
+                        })),
+                        Err(_) => Ok(Some(Value::Variant {
+                            name: "None".into(),
+                            payload: vec![],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Env.get expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Env.set" => match (args.first(), args.get(1)) {
+                (Some(Value::String(key)), Some(Value::String(val))) => {
+                    std::env::set_var(key, val);
+                    Ok(Some(Value::Unit))
+                }
+                _ => Err(RuntimeError {
+                    message: "Env.set expects (String, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
             _ => Ok(None),
         }
     }
@@ -2926,5 +3154,33 @@ fn placeholder_for_type(ty: &TypeExpr) -> Value {
                 payload: vec![],
             },
         },
+    }
+}
+
+/// Check whether a Value is an Err variant.
+fn is_err_variant(v: &Value) -> bool {
+    matches!(v, Value::Variant { name, .. } if name == "Err")
+}
+
+/// Convert a serde_json::Value to a Lace Value, mapping JSON null to None, objects to Map, etc.
+fn json_to_lace_value(v: JsonValue) -> Value {
+    match v {
+        JsonValue::Null => Value::Variant { name: "None".into(), payload: vec![] },
+        JsonValue::Bool(b) => Value::Bool(b),
+        JsonValue::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Value::Int(i)
+            } else {
+                Value::Float(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        JsonValue::String(s) => Value::String(s),
+        JsonValue::Array(arr) => Value::List(arr.into_iter().map(json_to_lace_value).collect()),
+        JsonValue::Object(obj) => {
+            let map: HashMap<String, Value> = obj.into_iter()
+                .map(|(k, v)| (k, json_to_lace_value(v)))
+                .collect();
+            Value::Map(map)
+        }
     }
 }

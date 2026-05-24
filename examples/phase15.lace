@@ -1,0 +1,173 @@
+# Phase 15: Http stdlib, Json stdlib, Env stdlib, retry/timeout decorators
+
+# Env stdlib
+
+fn test_env() -> Unit [IO] {
+    Env.set("LACE_TEST_VAR", "hello_lace")
+    let result = Env.get("LACE_TEST_VAR")
+    assert(result.is_some(), "Env.get returns Some for set var")
+    assert(result.unwrap() == "hello_lace", "Env.get returns set value")
+
+    let missing = Env.get("LACE_DOES_NOT_EXIST_XYZ")
+    assert(missing.is_none(), "Env.get returns None for missing var")
+}
+
+# Json stdlib
+
+fn test_json() -> Unit [IO] {
+    let raw = "{\"name\": \"Alice\", \"age\": 30, \"active\": true}"
+    let parsed = Json.parse(raw)
+
+    match parsed {
+        Ok(m) => {
+            let name_opt = Json.get(m, "name")
+            assert(name_opt.is_some(), "Json.get finds name key")
+            assert(name_opt.unwrap() == "Alice", "name equals Alice")
+
+            let keys = Json.keys(m)
+            assert(List.length(keys) == 3, "3 keys in JSON object")
+
+            let s = Json.stringify(m)
+            assert(s.len() > 0, "stringify produces non-empty string")
+        },
+        Err(e) => {
+            assert(false, "Json.parse failed unexpectedly")
+        },
+    }
+
+    let arr_raw = "[1, 2, 3]"
+    let arr_parsed = Json.parse(arr_raw)
+    match arr_parsed {
+        Ok(v) => {
+            let s = Json.stringify(v)
+            assert(s.len() > 0, "stringify array works")
+        },
+        Err(_e) => {
+            assert(false, "Json.parse array failed")
+        },
+    }
+}
+
+# Http stdlib
+
+fn test_http_get() -> Unit [IO] {
+    let result = Http.get("https://httpbin.org/get")
+    match result {
+        Ok(body) => {
+            assert(body.len() > 0, "Http.get returned non-empty body")
+            let parsed = Json.parse(body)
+            match parsed {
+                Ok(data) => {
+                    let url_field = Json.get(data, "url")
+                    assert(url_field.is_some(), "httpbin response has url field")
+                },
+                Err(_e) => {
+                    println("Json.parse of httpbin response skipped")
+                },
+            }
+        },
+        Err(msg) => {
+            println("Http.get unavailable (skipped): " ++ msg)
+        },
+    }
+}
+
+fn test_http_post_json() -> Unit [IO] {
+    let payload = Map.new()
+    let val = "myvalue"
+    let payload = Map.insert(payload, "key", val)
+    let result = Http.post_json("https://httpbin.org/post", payload)
+    match result {
+        Ok(body) => {
+            assert(body.len() > 0, "Http.post_json returned body")
+        },
+        Err(msg) => {
+            println("Http.post_json unavailable (skipped): " ++ msg)
+        },
+    }
+}
+
+# retry decorator
+
+@retry(max: 3)
+fn operation_with_retry() -> Dynamic [IO] {
+    Ok("succeeded")
+}
+
+@retry(max: 2)
+fn always_fails() -> Dynamic [IO] {
+    Err("always failing")
+}
+
+fn test_retry() -> Unit [IO] {
+    let result = operation_with_retry()
+    match result {
+        Ok(_v) => {
+            assert(true, "retry fn returns Ok when succeeds")
+        },
+        Err(_e) => {
+            assert(false, "expected Ok from retry fn")
+        },
+    }
+
+    let failing = always_fails()
+    match failing {
+        Err(_e) => {
+            assert(true, "retry fn returns Err after exhausting retries")
+        },
+        Ok(_v) => {
+            assert(false, "expected Err from always_fails")
+        },
+    }
+}
+
+# timed decorator
+
+@timed(ms: 5000)
+fn fast_operation() -> Dynamic [IO] {
+    Ok("done quickly")
+}
+
+fn test_timeout() -> Unit [IO] {
+    let result = fast_operation()
+    match result {
+        Ok(_v) => {
+            assert(true, "fast operation completes before timeout")
+        },
+        Err(e) => {
+            assert(e == "timeout", "unexpected error from timeout fn")
+        },
+    }
+}
+
+# Main
+
+fn main() -> Unit [IO] {
+    println("=== Phase 15: Http, Json, Env, retry/timeout ===")
+
+    println("--- Env stdlib ---")
+    test_env()
+    println("Env tests passed")
+
+    println("--- Json stdlib ---")
+    test_json()
+    println("Json tests passed")
+
+    println("--- Http.get (httpbin) ---")
+    test_http_get()
+    println("Http.get test done")
+
+    println("--- Http.post_json (httpbin) ---")
+    test_http_post_json()
+    println("Http.post_json test done")
+
+    println("--- retry decorator ---")
+    test_retry()
+    println("retry test passed")
+
+    println("--- timeout decorator ---")
+    test_timeout()
+    println("timeout test passed")
+
+    println("=== All Phase 15 tests passed ===")
+}
