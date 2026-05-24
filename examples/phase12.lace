@@ -2,6 +2,8 @@
 
 # ── Closures ──────────────────────────────────────────────────────────────────
 
+## Tests first-class closures: creation, capture of enclosing scope,
+## and passing closures to List.map and List.filter.
 fn test_closures() -> Unit [Pure] {
     let double = fn(x: Int) -> Int { x * 2 }
     let add = fn(a: Int, b: Int) -> Int { a + b }
@@ -27,12 +29,14 @@ fn test_closures() -> Unit [Pure] {
     assert_eq(tripled, [3, 6, 9, 12, 15], "List.map with named fn ref")
 }
 
+## Multiplies an integer by three. Used as a named function reference in tests.
 fn triple(x: Int) -> Int [Pure] {
     x * 3
 }
 
 # ── List.fold ─────────────────────────────────────────────────────────────────
 
+## Tests List.fold with sum, product, and string concatenation accumulators.
 fn test_list_fold() -> Unit [Pure] {
     let nums = [1, 2, 3, 4, 5]
 

@@ -166,11 +166,12 @@ impl Parser {
     }
 
     fn parse_top_level_item(&mut self) -> Option<TopLevelItem> {
+        let doc = self.collect_doc_comment();
         let ann = self.parse_annotations();
         match self.peek_kind() {
-            TokenKind::Fn => self.parse_fn_decl(ann).map(TopLevelItem::Function),
-            TokenKind::Tool => self.parse_tool_decl(ann).map(TopLevelItem::Tool),
-            TokenKind::Record => self.parse_record_decl().map(TopLevelItem::Record),
+            TokenKind::Fn => self.parse_fn_decl(doc, ann).map(TopLevelItem::Function),
+            TokenKind::Tool => self.parse_tool_decl(doc, ann).map(TopLevelItem::Tool),
+            TokenKind::Record => self.parse_record_decl(doc).map(TopLevelItem::Record),
             TokenKind::Enum => self.parse_enum_decl().map(TopLevelItem::Enum),
             TokenKind::Type => self.parse_type_alias().map(TopLevelItem::TypeAlias),
             TokenKind::Const => self.parse_const_decl().map(TopLevelItem::Const),
@@ -182,7 +183,21 @@ impl Parser {
         }
     }
 
-    fn parse_fn_decl(&mut self, annotations: Vec<Annotation>) -> Option<FnDecl> {
+    /// Consume consecutive DocComment tokens and join them as a single string.
+    fn collect_doc_comment(&mut self) -> Option<String> {
+        let mut lines = Vec::new();
+        while let TokenKind::DocComment(text) = self.peek_kind() {
+            lines.push(text.clone());
+            self.bump();
+        }
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
+    fn parse_fn_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>) -> Option<FnDecl> {
         let start = self.expect(TokenKind::Fn)?.span.start;
         let name = self.expect_ident()?;
         let generics = self.parse_generic_params();
@@ -223,6 +238,7 @@ impl Parser {
         let end = body.span.end;
 
         Some(FnDecl {
+            doc_comment,
             annotations,
             name,
             generics,
@@ -234,7 +250,7 @@ impl Parser {
         })
     }
 
-    fn parse_tool_decl(&mut self, annotations: Vec<Annotation>) -> Option<ToolDecl> {
+    fn parse_tool_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>) -> Option<ToolDecl> {
         let start = self.expect(TokenKind::Tool)?.span.start;
         let name = self.expect_ident()?;
         self.expect(TokenKind::LParen)?;
@@ -320,6 +336,7 @@ impl Parser {
         }
 
         Some(ToolDecl {
+            doc_comment,
             annotations,
             name,
             params,
@@ -332,7 +349,7 @@ impl Parser {
         })
     }
 
-    fn parse_record_decl(&mut self) -> Option<RecordDecl> {
+    fn parse_record_decl(&mut self, doc_comment: Option<String>) -> Option<RecordDecl> {
         let start = self.expect(TokenKind::Record)?.span.start;
         let name = self.expect_type_ident()?;
         let generics = self.parse_generic_params();
@@ -355,6 +372,7 @@ impl Parser {
         }
         self.expect(TokenKind::RBrace)?;
         Some(RecordDecl {
+            doc_comment,
             name,
             generics,
             fields,

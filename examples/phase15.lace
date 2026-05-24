@@ -2,6 +2,8 @@
 
 # Env stdlib
 
+## Tests environment variable get/set via Env.get and Env.set.
+## Verifies that set variables are readable and missing variables return None.
 fn test_env() -> Unit [IO] {
     Env.set("LACE_TEST_VAR", "hello_lace")
     let result = Env.get("LACE_TEST_VAR")
@@ -14,6 +16,8 @@ fn test_env() -> Unit [IO] {
 
 # Json stdlib
 
+## Tests JSON parsing and stringification.
+## Parses a JSON object and array, verifies key access and round-trip stringify.
 fn test_json() -> Unit [IO] {
     let raw = "{\"name\": \"Alice\", \"age\": 30, \"active\": true}"
     let parsed = Json.parse(raw)

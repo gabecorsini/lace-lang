@@ -53,7 +53,11 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if ch == '#' {
-                self.skip_line_comment();
+                if self.peek2() == Some('#') {
+                    self.lex_doc_comment();
+                } else {
+                    self.skip_line_comment();
+                }
                 continue;
             }
             if ch == '/' && self.peek2() == Some('*') {
@@ -508,6 +512,27 @@ impl<'a> Lexer<'a> {
             span_start: start,
             span_end: self.pos,
         });
+    }
+
+    fn lex_doc_comment(&mut self) {
+        let start = self.pos;
+        // consume `##`
+        self.bump();
+        self.bump();
+        // skip optional single space
+        if self.peek() == Some(' ') {
+            self.bump();
+        }
+        let mut text = String::new();
+        while let Some(ch) = self.peek() {
+            if ch == '\n' {
+                self.bump();
+                break;
+            }
+            text.push(ch);
+            self.bump();
+        }
+        self.push(TokenKind::DocComment(text), start);
     }
 
     fn skip_line_comment(&mut self) {

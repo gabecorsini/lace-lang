@@ -120,6 +120,11 @@ enum Commands {
         #[arg(long)]
         stdout: bool,
     },
+    /// Generate HTML documentation from .lace source files
+    Doc {
+        /// Path to a directory containing .lace files (defaults to current directory)
+        path: Option<PathBuf>,
+    },
     /// Version and build information
     Version,
 }
@@ -301,6 +306,9 @@ fn run() -> Result<()> {
         }
         Commands::Fmt { file, stdout } => {
             run_fmt(&file, stdout)?;
+        }
+        Commands::Doc { path } => {
+            run_doc(path)?;
         }
         Commands::Version => {
             print_version();
@@ -1038,6 +1046,283 @@ fn run_fmt(file: &PathBuf, to_stdout: bool) -> Result<()> {
         println!("{} {}", "fmt ok:".green().bold(), file.display());
     }
     Ok(())
+}
+
+fn run_doc(path: Option<PathBuf>) -> Result<()> {
+    // Resolve directory
+    let dir = if let Some(p) = path {
+        p
+    } else {
+        // Try to find project root via lace.toml, fall back to CWD
+        let cwd = std::env::current_dir().context("failed to get cwd")?;
+        if let Some((root, _)) = find_manifest(&cwd) {
+            root
+        } else {
+            cwd
+        }
+    };
+
+    // Collect .lace files
+    let mut lace_files: Vec<PathBuf> = Vec::new();
+    collect_lace_files_recursive(&dir, &mut lace_files)?;
+    lace_files.sort();
+
+    if lace_files.is_empty() {
+        anyhow::bail!("no .lace files found in {}", dir.display());
+    }
+
+    // Gather documented items
+    #[derive(Debug)]
+    struct DocItem {
+        kind: &'static str,
+        name: String,
+        signature: String,
+        doc: String,
+        source_file: String,
+    }
+
+    let mut all_items: Vec<DocItem> = Vec::new();
+
+    for file in &lace_files {
+        let source = load_source(file)?;
+        let (program, parse_errors) = lace_parser::parse_program(&source);
+        if !parse_errors.is_empty() {
+            // Skip files with parse errors for doc generation
+            continue;
+        }
+        let program = match program {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let rel = file
+            .strip_prefix(&dir)
+            .unwrap_or(file.as_path())
+            .display()
+            .to_string();
+
+        for item in &program.items {
+            match item {
+                TopLevelItem::Function(f) => {
+                    if let Some(doc) = &f.doc_comment {
+                        let sig = build_fn_signature(f);
+                        all_items.push(DocItem {
+                            kind: "fn",
+                            name: f.name.clone(),
+                            signature: sig,
+                            doc: doc.clone(),
+                            source_file: rel.clone(),
+                        });
+                    }
+                }
+                TopLevelItem::Record(r) => {
+                    if let Some(doc) = &r.doc_comment {
+                        let sig = format!(
+                            "record {}{}",
+                            r.name,
+                            if r.generics.is_empty() {
+                                String::new()
+                            } else {
+                                format!(
+                                    "<{}>",
+                                    r.generics
+                                        .iter()
+                                        .map(|g| g.name.clone())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )
+                            }
+                        );
+                        all_items.push(DocItem {
+                            kind: "record",
+                            name: r.name.clone(),
+                            signature: sig,
+                            doc: doc.clone(),
+                            source_file: rel.clone(),
+                        });
+                    }
+                }
+                TopLevelItem::Tool(t) => {
+                    if let Some(doc) = &t.doc_comment {
+                        let params = t
+                            .params
+                            .iter()
+                            .map(|p| format!("{}: {}", p.name, fmt_type_expr(&p.ty)))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        let sig = format!(
+                            "tool {}({}) -> {}",
+                            t.name,
+                            params,
+                            fmt_type_expr(&t.ret_ty)
+                        );
+                        all_items.push(DocItem {
+                            kind: "tool",
+                            name: t.name.clone(),
+                            signature: sig,
+                            doc: doc.clone(),
+                            source_file: rel.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Create docs/ output directory
+    let out_dir = dir.join("docs");
+    fs::create_dir_all(&out_dir).context("failed to create docs/ directory")?;
+
+    // CSS (inlined into index.html)
+    let css = r#"
+:root { --bg: #1a1b26; --surface: #24283b; --border: #414868; --text: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --green: #9ece6a; --yellow: #e0af68; --red: #f7768e; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.6; }
+header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
+header h1 { font-size: 1.4rem; color: var(--accent); }
+header .subtitle { color: var(--muted); font-size: 0.9rem; }
+main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
+h2 { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; margin: 2rem 0 1rem; font-size: 1.2rem; }
+.item-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.item-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; text-decoration: none; color: inherit; transition: border-color 0.15s; }
+.item-card:hover { border-color: var(--accent); }
+.item-card .kind { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; }
+.kind-fn { background: #1a2f4a; color: var(--accent); }
+.kind-record { background: #1f3a1f; color: var(--green); }
+.kind-tool { background: #3a2f1a; color: var(--yellow); }
+.item-card .name { font-weight: 600; font-size: 1rem; margin: 0.3rem 0 0.2rem; }
+.item-card .doc-preview { color: var(--muted); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.9rem; }
+code { font-family: 'Fira Code', 'Cascadia Code', monospace; }
+.doc-text { margin: 1.25rem 0; line-height: 1.8; }
+.meta { color: var(--muted); font-size: 0.85rem; margin-top: 1rem; }
+a.back { color: var(--accent); text-decoration: none; display: inline-block; margin-bottom: 1.5rem; }
+a.back:hover { text-decoration: underline; }
+"#;
+
+    // Generate individual item pages
+    for item in &all_items {
+        let slug = format!("{}-{}.html", item.kind, slug_name(&item.name));
+        let html = format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{name} — Lace Docs</title>
+<style>{css}</style>
+</head>
+<body>
+<header><h1>Lace Docs</h1><span class="subtitle">{kind} {name}</span></header>
+<main>
+<a class="back" href="index.html">← Back to index</a>
+<h2><span class="kind kind-{kind}">{kind}</span> {name}</h2>
+<pre><code>{sig}</code></pre>
+<div class="doc-text">{doc}</div>
+<p class="meta">Defined in <code>{src}</code></p>
+</main>
+</body>
+</html>"#,
+            name = html_escape(&item.name),
+            kind = item.kind,
+            css = css,
+            sig = html_escape(&item.signature),
+            doc = html_escape(&item.doc).replace('\n', "<br>"),
+            src = html_escape(&item.source_file),
+        );
+        fs::write(out_dir.join(&slug), &html)
+            .with_context(|| format!("failed to write {slug}"))?;
+    }
+
+    // Generate index.html
+    let item_rows: String = all_items
+        .iter()
+        .map(|item| {
+            let slug = format!("{}-{}.html", item.kind, slug_name(&item.name));
+            let preview = item.doc.lines().next().unwrap_or("").to_string();
+            format!(
+                r#"<a class="item-card" href="{slug}">
+  <span class="kind kind-{kind}">{kind}</span>
+  <div class="name">{name}</div>
+  <div class="doc-preview">{preview}</div>
+</a>"#,
+                slug = slug,
+                kind = item.kind,
+                name = html_escape(&item.name),
+                preview = html_escape(&preview),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let index_html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lace Docs</title>
+<style>{css}</style>
+</head>
+<body>
+<header><h1>Lace Docs</h1><span class="subtitle">{count} documented item(s)</span></header>
+<main>
+<h2>All Items</h2>
+<div class="item-list">
+{rows}
+</div>
+</main>
+</body>
+</html>"#,
+        css = css,
+        count = all_items.len(),
+        rows = item_rows,
+    );
+    fs::write(out_dir.join("index.html"), &index_html).context("failed to write docs/index.html")?;
+
+    println!(
+        "{} docs/ — {} item(s) documented",
+        "doc ok:".green().bold(),
+        all_items.len()
+    );
+
+    Ok(())
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn slug_name(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+fn build_fn_signature(f: &lace_ast::FnDecl) -> String {
+    let params = f
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, fmt_type_expr(&p.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let ret = f
+        .ret_ty
+        .as_ref()
+        .map(|t| format!(" -> {}", fmt_type_expr(t)))
+        .unwrap_or_default();
+    let effects = if f.effects.is_empty() {
+        String::new()
+    } else {
+        let tags = f.effects.iter().map(fmt_effect_expr).collect::<Vec<_>>().join(", ");
+        format!(" [{tags}]")
+    };
+    format!("fn {}({}){}{}", f.name, params, ret, effects)
 }
 
 fn fmt_program(program: &lace_ast::Program) -> String {

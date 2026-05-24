@@ -82,6 +82,7 @@ pub enum DurationUnit {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FnDecl {
+    pub doc_comment: Option<String>,
     pub annotations: Vec<Annotation>,
     pub name: String,
     pub generics: Vec<GenericParam>,
@@ -94,6 +95,7 @@ pub struct FnDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolDecl {
+    pub doc_comment: Option<String>,
     pub annotations: Vec<Annotation>,
     pub name: String,
     pub params: Vec<ToolParam>,
@@ -104,6 +106,7 @@ pub struct ToolDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordDecl {
+    pub doc_comment: Option<String>,
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub fields: Vec<RecordField>,

@@ -91,4 +91,7 @@ pub enum TokenKind {
     At,
 
     Eof,
+
+    /// `## ...` doc-comment line (text after the `## ` prefix, trimmed)
+    DocComment(String),
 }
