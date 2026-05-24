@@ -681,7 +681,14 @@ fn stdlib_effect_for_name(name: &str) -> Option<EffectTag> {
         | "context_remaining" | "context_used" | "context_assert" => Some(EffectTag::Io),
         "now_unix" | "now_millis" => Some(EffectTag::Time),
         "random_float" | "random_int" => Some(EffectTag::Rand),
-        "to_string" | "List.length" | "List.range" | "List.map" | "List.filter" => None,
+        "to_string"
+        | "assert"
+        | "assert_eq"
+        | "assert_err"
+        | "List.length"
+        | "List.range"
+        | "List.map"
+        | "List.filter" => None,
         _ => None,
     }
 }

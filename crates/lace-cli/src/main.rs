@@ -1,11 +1,15 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
-use lace_ast::{EffectExpr, EffectTag};
+use lace_ast::{EffectExpr, EffectTag, TopLevelItem};
 use lace_effects::{check_program as check_effects, EffectIssue, IssueLevel};
-use lace_interp::{run_with_options, RunOptions, RuntimeError, Value};
+use lace_interp::{run_function_with_options, run_with_options, RunOptions, RuntimeError, Value};
 use lace_parser::{parse_program, ParseError};
 use lace_types::{check_program as check_types, TypeError};
 use rustyline::error::ReadlineError;
@@ -23,6 +27,12 @@ enum Commands {
     /// Run a .lace program (parse + type + effect checks, then execute)
     Run {
         file: PathBuf,
+        #[arg(long)]
+        checkpoint: Option<PathBuf>,
+    },
+    /// Run @test functions from a .lace file or directory
+    Test {
+        path: PathBuf,
         #[arg(long)]
         checkpoint: Option<PathBuf>,
     },
@@ -79,6 +89,81 @@ fn run() -> Result<()> {
                     report_runtime_error(&source, &err);
                     anyhow::bail!("runtime execution failed");
                 }
+            }
+        }
+        Commands::Test { path, checkpoint } => {
+            let started = Instant::now();
+            let files = collect_test_files(&path)?;
+            if files.is_empty() {
+                anyhow::bail!("no .lace files found at {}", path.display());
+            }
+
+            let mut all_tests: Vec<(PathBuf, String)> = Vec::new();
+
+            for file in &files {
+                let source = load_source(file)?;
+                let (program, _effect_issues) = validate_source(&source)?;
+
+                let tests = collect_tests(&program);
+                for test in tests {
+                    all_tests.push((file.clone(), test.name.clone()));
+                }
+            }
+
+            println!("running {} tests", all_tests.len());
+
+            let mut passed = 0usize;
+            let mut failed = 0usize;
+            let mut failures: Vec<(String, String)> = Vec::new();
+
+            for (file, test_name) in all_tests {
+                let source = load_source(&file)?;
+                let (program, _issues) = validate_source(&source)?;
+                let options = RunOptions {
+                    checkpoint_path: checkpoint.clone().map(|p| p.display().to_string()),
+                    replay_mode: false,
+                    source_path: Some(file.display().to_string()),
+                };
+
+                match run_function_with_options(&program, &test_name, options) {
+                    Ok(_) => {
+                        passed += 1;
+                        println!("test {} ... {}", test_name, "ok".green().bold());
+                    }
+                    Err(err) => {
+                        failed += 1;
+                        println!("test {} ... {}", test_name, "FAILED".red().bold());
+                        failures.push((test_name, format_test_failure_message(&source, &err)));
+                    }
+                }
+            }
+
+            if !failures.is_empty() {
+                println!();
+                println!("{}", "failures:".red().bold());
+                for (name, message) in &failures {
+                    println!("  {}: {}", name, message);
+                }
+            }
+
+            println!();
+            if failed == 0 {
+                println!(
+                    "test result: {}. {} passed; {} failed; finished in {:.2}s",
+                    "ok".green().bold(),
+                    passed,
+                    failed,
+                    started.elapsed().as_secs_f64()
+                );
+            } else {
+                println!(
+                    "test result: {}. {} passed; {} failed; finished in {:.2}s",
+                    "FAILED".red().bold(),
+                    passed,
+                    failed,
+                    started.elapsed().as_secs_f64()
+                );
+                std::process::exit(1);
             }
         }
         Commands::Replay { checkpoint, file } => {
@@ -151,6 +236,63 @@ fn print_version() {
 fn load_source(path: &PathBuf) -> Result<String> {
     fs::read_to_string(path)
         .with_context(|| format!("failed to read source file {}", path.display()))
+}
+
+fn collect_test_files(path: &Path) -> Result<Vec<PathBuf>> {
+    if path.is_file() {
+        if path.extension().and_then(|s| s.to_str()) == Some("lace") {
+            return Ok(vec![path.to_path_buf()]);
+        }
+        anyhow::bail!("test path is not a .lace file: {}", path.display());
+    }
+
+    if !path.is_dir() {
+        anyhow::bail!("test path does not exist: {}", path.display());
+    }
+
+    let mut out = Vec::new();
+    collect_test_files_recursive(path, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+fn collect_test_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_test_files_recursive(&path, out)?;
+        } else if path.extension().and_then(|s| s.to_str()) == Some("lace") {
+            out.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_tests(program: &lace_ast::Program) -> Vec<lace_ast::FnDecl> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::Function(f)
+                if f.annotations.iter().any(|a| a.name == "test") =>
+            {
+                Some(f.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn format_test_failure_message(source: &str, err: &RuntimeError) -> String {
+    if let Some(span) = err.span {
+        format!("{} [{}]", err.message, render_span_excerpt(source, span.start, span.end))
+    } else {
+        err.message.clone()
+    }
 }
 
 fn validate_source(source: &str) -> Result<(lace_ast::Program, Vec<EffectIssue>)> {

@@ -111,6 +111,18 @@ impl Checker {
         self.fn_sigs
             .insert("to_string".into(), (vec![Type::Dynamic], Type::String));
         self.fn_sigs.insert(
+            "assert".into(),
+            (vec![Type::Bool, Type::String], Type::Unit),
+        );
+        self.fn_sigs.insert(
+            "assert_eq".into(),
+            (vec![Type::Dynamic, Type::Dynamic, Type::String], Type::Unit),
+        );
+        self.fn_sigs.insert(
+            "assert_err".into(),
+            (vec![Type::Dynamic, Type::String], Type::Unit),
+        );
+        self.fn_sigs.insert(
             "List.length".into(),
             (vec![Type::List(Box::new(Type::Dynamic))], Type::Int),
         );

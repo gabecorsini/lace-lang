@@ -1,0 +1,42 @@
+@test
+fn test_arithmetic() -> Unit [Pure] {
+    assert(1 + 1 == 2, "1 + 1 should equal 2")
+}
+
+@test
+fn test_string_concat() -> Unit [Pure] {
+    assert_eq("hello" ++ " world", "hello world", "concat should match")
+}
+
+@test
+fn test_list_range_length() -> Unit [Pure] {
+    let xs = List.range(0, 5)
+    assert_eq(List.length(xs), 5, "List.range(0, 5) should have 5 elements")
+}
+
+fn double(x: Int) -> Int [Pure] {
+    x * 2
+}
+
+@test
+fn test_list_map_output() -> Unit [Pure] {
+    let mapped = List.map(List.range(0, 3), double)
+    assert_eq(mapped, [0, 2, 4], "List.map output mismatch")
+}
+
+@test
+fn test_for_loop_side_effect_counter() -> Unit [Pure] {
+    mut let counter = 0
+    for _x in List.range(0, 4) {
+        counter = counter + 1
+    }
+    assert_eq(counter, 4, "for loop counter should increment 4 times")
+}
+
+@shell("sh -c 'echo boom >&2; exit 1'")
+tool always_err() -> Result<String, ToolError>
+
+@test
+fn test_assert_err_on_err_value() -> Unit [ToolCall] {
+    assert_err(always_err(), "always_err should return Err")
+}

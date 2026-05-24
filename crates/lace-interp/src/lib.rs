@@ -252,6 +252,34 @@ impl Interpreter {
         Ok(out)
     }
 
+    pub fn run_named_function(
+        mut self,
+        program: &Program,
+        function_name: &str,
+    ) -> Result<Value, RuntimeError> {
+        // Register module name bindings so Lace code can do List.range(...), etc.
+        self.env.define("List".into(), Value::String("List".into()));
+
+        self.load_imports(program)?;
+        self.register_items(program);
+
+        // execute top-level consts as bindings
+        for item in &program.items {
+            if let TopLevelItem::Const(c) = item {
+                let value = self.eval_expr(&c.expr)?;
+                self.env.define(c.name.clone(), value);
+            }
+        }
+
+        let out = self.call_function(function_name, vec![], Span::default())?;
+
+        if self.checkpoint_path.is_some() {
+            self.save_checkpoint_state()?;
+        }
+
+        Ok(out)
+    }
+
     fn register_items(&mut self, program: &Program) {
         if let Some(module) = &program.module {
             self.module_name = module.path.join(".");
@@ -869,6 +897,94 @@ impl Interpreter {
             "to_string" => {
                 let out = args.first().map(display_value).unwrap_or_default();
                 Ok(Some(Value::String(out)))
+            }
+            "assert" => match (args.first(), args.get(1)) {
+                (Some(Value::Bool(true)), _) => Ok(Some(Value::Unit)),
+                (Some(Value::Bool(false)), Some(Value::String(message))) => Err(RuntimeError {
+                    message: format!("assertion failed: {message}"),
+                    span: None,
+                }),
+                (Some(Value::Bool(false)), _) => Err(RuntimeError {
+                    message: "assertion failed".into(),
+                    span: None,
+                }),
+                _ => Err(RuntimeError {
+                    message: "assert expects (Bool, String)".into(),
+                    span: None,
+                }),
+            },
+            "assert_eq" => {
+                let Some(actual) = args.first() else {
+                    return Err(RuntimeError {
+                        message: "assert_eq expects (actual, expected, message)".into(),
+                        span: None,
+                    });
+                };
+                let Some(expected) = args.get(1) else {
+                    return Err(RuntimeError {
+                        message: "assert_eq expects (actual, expected, message)".into(),
+                        span: None,
+                    });
+                };
+                let message = match args.get(2) {
+                    Some(Value::String(s)) => Some(s.as_str()),
+                    Some(_) => {
+                        return Err(RuntimeError {
+                            message: "assert_eq expects third argument to be String".into(),
+                            span: None,
+                        });
+                    }
+                    None => None,
+                };
+
+                if actual == expected {
+                    Ok(Some(Value::Unit))
+                } else {
+                    let mut msg = format!(
+                        "assertion failed: expected values to be equal (left: {}, right: {})",
+                        display_value(actual),
+                        display_value(expected)
+                    );
+                    if let Some(extra) = message {
+                        msg.push_str(&format!(": {extra}"));
+                    }
+                    Err(RuntimeError {
+                        message: msg,
+                        span: None,
+                    })
+                }
+            }
+            "assert_err" => {
+                let Some(value) = args.first() else {
+                    return Err(RuntimeError {
+                        message: "assert_err expects (result, message)".into(),
+                        span: None,
+                    });
+                };
+                let message = match args.get(1) {
+                    Some(Value::String(s)) => Some(s.as_str()),
+                    Some(_) => {
+                        return Err(RuntimeError {
+                            message: "assert_err expects second argument to be String".into(),
+                            span: None,
+                        });
+                    }
+                    None => None,
+                };
+
+                match value {
+                    Value::Variant { name, .. } if name == "Err" => Ok(Some(Value::Unit)),
+                    _ => {
+                        let mut msg = "assertion failed: expected result to be Err(_)".to_string();
+                        if let Some(extra) = message {
+                            msg.push_str(&format!(": {extra}"));
+                        }
+                        Err(RuntimeError {
+                            message: msg,
+                            span: None,
+                        })
+                    }
+                }
             }
             "List.length" => match args.first() {
                 Some(Value::List(items)) => Ok(Some(Value::Int(items.len() as i64))),
@@ -1772,6 +1888,15 @@ pub fn run(program: &Program) -> Result<Value, RuntimeError> {
 pub fn run_with_options(program: &Program, options: RunOptions) -> Result<Value, RuntimeError> {
     Interpreter::new_with_options(program.module.as_ref().map(|m| m.path.join(".")), options)
         .run_program(program)
+}
+
+pub fn run_function_with_options(
+    program: &Program,
+    function_name: &str,
+    options: RunOptions,
+) -> Result<Value, RuntimeError> {
+    Interpreter::new_with_options(program.module.as_ref().map(|m| m.path.join(".")), options)
+        .run_named_function(program, function_name)
 }
 
 fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {

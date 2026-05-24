@@ -1,0 +1,4 @@
+@test
+fn test_should_fail() -> Unit [Pure] {
+    assert_eq(2 + 2, 5, "intentional failure")
+}
