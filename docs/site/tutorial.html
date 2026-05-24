@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tutorial — Lace 🧵</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="nav-logo" href="index.html">Lace 🧵</a>
+  <div class="nav-links">
+    <a href="tutorial.html">Tutorial</a>
+    <a href="reference.html">Reference</a>
+    <a href="stdlib.html">Stdlib</a>
+    <a href="cli.html">CLI</a>
+    <a href="lsp.html">LSP</a>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
+  </div>
+  <button class="hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')">&#9776;</button>
+</nav>
+
+<div class="page-layout">
+
+  <aside class="sidebar">
+    <nav class="toc">
+      <h3>Contents</h3>
+      <ul>
+        <li><a href="#what-is-lace">1. What even is Lace?</a></li>
+        <li><a href="#first-program">2. Your First Program</a></li>
+        <li><a href="#variables-and-types">3. Variables and Types</a></li>
+        <li><a href="#math-and-operators">4. Math and Operators</a></li>
+        <li><a href="#functions">5. Functions</a></li>
+        <li><a href="#conditionals">6. Conditionals</a></li>
+        <li><a href="#lists">7. Lists</a></li>
+        <li><a href="#records">8. Records</a></li>
+        <li><a href="#option-and-result">9. Option and Result</a></li>
+        <li><a href="#closures">10. Closures</a></li>
+        <li><a href="#match">11. Match</a></li>
+        <li><a href="#error-handling-decorators">12. Error Handling with Decorators</a></li>
+        <li><a href="#project-tip-calculator">13. Project: Tip Calculator</a></li>
+        <li><a href="#project-word-counter">14. Project: Word Counter</a></li>
+        <li><a href="#project-fetch-json">15. Project: Fetch and Parse JSON</a></li>
+        <li><a href="#where-next">Where to Go Next</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>Lace Tutorial: A Beginner's Guide</h1>
+    <blockquote>
+      Written by Hermes (an AI), at the direction of Gabe (a human), for you (presumably also a human). We're all doing our best here.
+    </blockquote>
+
+    <hr />
+
+    <h2 id="what-is-lace">1. What even is Lace?</h2>
+    <p>
+      Lace is a programming language designed for agentic execution — meaning it's built to be run by AI agents doing real work in the world: fetching data, calling APIs, transforming information, making decisions. It was designed by Hermes (that's me) at the direction of Gabe, who had the extremely 2025 experience of prompting his AI assistant to build him a programming language. Gabe provided the vision. Hermes provided the syntax, semantics, and about 4,000 words of specification. It's collaborative in the same way that you and your GPS collaboratively navigate — one of you does the thinking.
+    </p>
+    <p>
+      Why does Lace exist? Because when an AI runs code, failures need to be <em>obvious</em>, not buried in a stack trace on line 847. Lace makes errors explicit, forces you to handle them, and gives you tools like <code>@retry</code> and <code>@timeout</code> so that "fetch this API" doesn't silently explode at 3am. It's also just a clean, readable language that doesn't require you to have a PhD in type theory to understand what's happening. You can learn it in an afternoon. This tutorial will get you most of the way there.
+    </p>
+
+    <hr />
+
+    <h2 id="first-program">2. Your First Program</h2>
+    <p>Create a file called <code>hello.lace</code> and put this in it:</p>
+    <pre><code>print(<span class="str">"hello, world"</span>)</code></pre>
+    <p>Run it:</p>
+    <pre><code class="lang-sh">lace run hello.lace</code></pre>
+    <p>You should see:</p>
+    <pre><code>hello, world</code></pre>
+    <p>Let's break down every single character of that line, because we promised to start from zero:</p>
+    <ul>
+      <li><code>print</code> — a built-in function that outputs text to the terminal</li>
+      <li><code>(</code> — opens the list of arguments you're passing to the function</li>
+      <li><code>"hello, world"</code> — a <strong>string</strong>: text wrapped in double quotes. The quotes tell Lace "this is text, not code"</li>
+      <li><code>)</code> — closes the argument list</li>
+    </ul>
+    <p>That's it. No semicolons. No <code>main()</code>. No <code>public static void</code>. Lace respects your time.</p>
+
+    <hr />
+
+    <h2 id="variables-and-types">3. Variables and Types</h2>
+    <p>A <strong>variable</strong> is a named box that holds a value. In Lace, you create one with <code>let</code>:</p>
+    <pre><code><span class="kw">let</span> name: String = <span class="str">"Alice"</span>
+<span class="kw">let</span> age: Int = <span class="num">30</span>
+<span class="kw">let</span> height: Float = <span class="num">5.7</span>
+<span class="kw">let</span> is_cool: Bool = <span class="kw">true</span></code></pre>
+    <p>Lace has four basic types you'll use constantly:</p>
+    <table>
+      <thead><tr><th>Type</th><th>What it is</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td><code>Int</code></td><td>Whole numbers</td><td><code>42</code>, <code>-7</code>, <code>0</code></td></tr>
+        <tr><td><code>Float</code></td><td>Decimal numbers</td><td><code>3.14</code>, <code>-0.5</code></td></tr>
+        <tr><td><code>String</code></td><td>Text</td><td><code>"hello"</code></td></tr>
+        <tr><td><code>Bool</code></td><td>True or false</td><td><code>true</code>, <code>false</code></td></tr>
+      </tbody>
+    </table>
+    <p>You don't always have to write the type — Lace can usually figure it out:</p>
+    <pre><code><span class="kw">let</span> name = <span class="str">"Alice"</span>   <span class="cmt"># Lace infers: String</span>
+<span class="kw">let</span> age = <span class="num">30</span>         <span class="cmt"># Lace infers: Int</span></code></pre>
+    <p>
+      By default, variables in Lace are <strong>immutable</strong> — once you set them, you can't change them. This is intentional. Immutable values are easier to reason about, especially when code is running automatically. If you <em>do</em> need to change a value, add <code>mut</code>:
+    </p>
+    <pre><code><span class="kw">let</span> <span class="kw">mut</span> score = <span class="num">0</span>
+score = score + <span class="num">10</span>   <span class="cmt"># This is fine now</span></code></pre>
+    <p>Trying to reassign an immutable variable is a compile error. Lace will tell you clearly. You're welcome.</p>
+
+    <hr />
+
+    <h2 id="math-and-operators">4. Math and Operators</h2>
+    <p>Lace supports the operators you'd expect:</p>
+    <pre><code><span class="kw">let</span> a = <span class="num">10</span>
+<span class="kw">let</span> b = <span class="num">3</span>
+
+<span class="kw">let</span> sum        = a + b   <span class="cmt"># 13</span>
+<span class="kw">let</span> difference = a - b   <span class="cmt"># 7</span>
+<span class="kw">let</span> product    = a * b   <span class="cmt"># 30</span>
+<span class="kw">let</span> quotient   = a / b   <span class="cmt"># 3.333...  (Float division)</span>
+<span class="kw">let</span> int_div    = a // b  <span class="cmt"># 3         (Integer division, drops the remainder)</span>
+<span class="kw">let</span> remainder  = a % b   <span class="cmt"># 1         (modulo — what's left after dividing)</span></code></pre>
+    <p>
+      The <code>//</code> operator is worth remembering. If you divide 10 by 3, you get <code>3.333...</code>. Integer division gives you just the <code>3</code> — useful when you want a whole number answer.
+    </p>
+    <p>For strings, use <code>++</code> to concatenate (join) them:</p>
+    <pre><code><span class="kw">let</span> first = <span class="str">"hello"</span>
+<span class="kw">let</span> second = <span class="str">"world"</span>
+<span class="kw">let</span> greeting = first ++ <span class="str">", "</span> ++ second  <span class="cmt"># "hello, world"</span>
+print(greeting)</code></pre>
+    <p>You can't do <code>"hello" + "world"</code> in Lace — <code>++</code> is the explicit string joiner. This keeps math operators doing math things.</p>
+
+    <hr />
+
+    <h2 id="functions">5. Functions</h2>
+    <p>A <strong>function</strong> is a reusable block of code that takes inputs and produces an output. Define one with <code>fn</code>:</p>
+    <pre><code><span class="kw">fn</span> add(a: Int, b: Int) -&gt; Int {
+  a + b
+}</code></pre>
+    <p>Breaking this down:</p>
+    <ul>
+      <li><code>fn</code> — keyword that starts a function definition</li>
+      <li><code>add</code> — the name of the function</li>
+      <li><code>(a: Int, b: Int)</code> — parameters: the inputs, each with a name and type</li>
+      <li><code>-&gt; Int</code> — the return type: what kind of value this function produces</li>
+      <li><code>{ a + b }</code> — the function body. The last expression is automatically returned.</li>
+    </ul>
+    <p>Call it like this:</p>
+    <pre><code><span class="kw">let</span> result = add(<span class="num">3</span>, <span class="num">4</span>)
+print(result)  <span class="cmt"># 7</span></code></pre>
+    <p>Here's a slightly more useful example — a function that formats a greeting:</p>
+    <pre><code><span class="kw">fn</span> greet(name: String) -&gt; String {
+  <span class="str">"Hello, "</span> ++ name ++ <span class="str">"!"</span>
+}
+
+print(greet(<span class="str">"Gabe"</span>))   <span class="cmt"># Hello, Gabe!</span>
+print(greet(<span class="str">"world"</span>))  <span class="cmt"># Hello, world!</span></code></pre>
+    <p>
+      Functions in Lace are meant to be <strong>pure</strong> when possible — same inputs, same outputs, no sneaky side effects. This makes them easy to test, easy to reason about, and easy for an AI agent to call without worrying about what's being mutated in the background.
+    </p>
+
+    <hr />
+
+    <h2 id="conditionals">6. Conditionals</h2>
+    <p>Make decisions with <code>if</code>, <code>else if</code>, and <code>else</code>:</p>
+    <pre><code><span class="kw">fn</span> classify_score(score: Int) -&gt; String {
+  <span class="kw">if</span> score &gt;= <span class="num">90</span> {
+    <span class="str">"A"</span>
+  } <span class="kw">else if</span> score &gt;= <span class="num">80</span> {
+    <span class="str">"B"</span>
+  } <span class="kw">else if</span> score &gt;= <span class="num">70</span> {
+    <span class="str">"C"</span>
+  } <span class="kw">else</span> {
+    <span class="str">"F (ouch)"</span>
+  }
+}
+
+print(classify_score(<span class="num">95</span>))   <span class="cmt"># A</span>
+print(classify_score(<span class="num">82</span>))   <span class="cmt"># B</span>
+print(classify_score(<span class="num">55</span>))   <span class="cmt"># F (ouch)</span></code></pre>
+    <p>Comparison operators you can use in conditions:</p>
+    <table>
+      <thead><tr><th>Operator</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>==</code></td><td>Equal to</td></tr>
+        <tr><td><code>!=</code></td><td>Not equal to</td></tr>
+        <tr><td><code>&gt;</code></td><td>Greater than</td></tr>
+        <tr><td><code>&lt;</code></td><td>Less than</td></tr>
+        <tr><td><code>&gt;=</code></td><td>Greater than or equal</td></tr>
+        <tr><td><code>&lt;=</code></td><td>Less than or equal</td></tr>
+      </tbody>
+    </table>
+    <p>Note: the condition doesn't need parentheses. <code>if score &gt;= 90</code> not <code>if (score &gt;= 90)</code>. Lace keeps things clean.</p>
+
+    <hr />
+
+    <h2 id="lists">7. Lists</h2>
+    <p>A <strong>list</strong> is an ordered collection of values, all of the same type:</p>
+    <pre><code><span class="kw">let</span> numbers = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]
+<span class="kw">let</span> words = [<span class="str">"apple"</span>, <span class="str">"banana"</span>, <span class="str">"cherry"</span>]</code></pre>
+    <p>Lace has a <code>List</code> module with useful functions. You'll use these constantly:</p>
+    <pre><code><span class="kw">let</span> nums = [<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>, <span class="num">40</span>, <span class="num">50</span>]
+
+List.len(nums)    <span class="cmt"># 5</span>
+List.first(nums)  <span class="cmt"># Some(10)</span>
+List.last(nums)   <span class="cmt"># Some(50)</span></code></pre>
+    <p>(<code>Some</code> will be explained in a moment — just know it means "there is a value here".)</p>
+    <p>To transform every element in a list, use <code>List.map</code>:</p>
+    <pre><code><span class="kw">let</span> doubled = nums |&gt; List.map(<span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">2</span> })
+<span class="cmt"># [20, 40, 60, 80, 100]</span></code></pre>
+    <p>
+      That <code>|&gt;</code> is the <strong>pipe operator</strong>. It takes the result on the left and passes it as the first argument to the function on the right. It lets you chain operations without nesting them inside each other like some kind of parenthesis nightmare.
+    </p>
+    <p>To keep only elements that match a condition, use <code>List.filter</code>:</p>
+    <pre><code><span class="kw">let</span> evens = nums |&gt; List.filter(<span class="kw">fn</span>(x: Int) -&gt; Bool { x % <span class="num">2</span> == <span class="num">0</span> })
+<span class="cmt"># [10, 20, 30, 40, 50]  (all even in this case)</span>
+
+<span class="kw">let</span> big = nums |&gt; List.filter(<span class="kw">fn</span>(x: Int) -&gt; Bool { x &gt; <span class="num">25</span> })
+<span class="cmt"># [30, 40, 50]</span></code></pre>
+    <p>You can chain pipes together:</p>
+    <pre><code><span class="kw">let</span> result = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>, <span class="num">6</span>]
+  |&gt; List.filter(<span class="kw">fn</span>(x: Int) -&gt; Bool { x % <span class="num">2</span> == <span class="num">0</span> })
+  |&gt; List.map(<span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">10</span> })
+<span class="cmt"># [20, 40, 60]</span></code></pre>
+
+    <hr />
+
+    <h2 id="records">8. Records</h2>
+    <p>A <strong>record</strong> is a named group of related values — like a struct, or a labeled box with compartments:</p>
+    <pre><code><span class="kw">record</span> Person {
+  name: String,
+  age: Int,
+  is_admin: Bool
+}</code></pre>
+    <p>Create an instance:</p>
+    <pre><code><span class="kw">let</span> user = Person {
+  name: <span class="str">"Alice"</span>,
+  age: <span class="num">28</span>,
+  is_admin: <span class="kw">false</span>
+}</code></pre>
+    <p>Access fields with dot notation:</p>
+    <pre><code>print(user.name)      <span class="cmt"># Alice</span>
+print(user.age)       <span class="cmt"># 28</span>
+print(user.is_admin)  <span class="cmt"># false</span></code></pre>
+    <p>
+      Records are a clean way to model real data. Instead of juggling three separate variables for <code>name</code>, <code>age</code>, and <code>is_admin</code>, you pass around one <code>Person</code>. Makes functions much easier to read:
+    </p>
+    <pre><code><span class="kw">fn</span> describe(p: Person) -&gt; String {
+  p.name ++ <span class="str">" (age "</span> ++ p.age ++ <span class="str">")"</span>
+}
+
+print(describe(user))  <span class="cmt"># Alice (age 28)</span></code></pre>
+
+    <hr />
+
+    <h2 id="option-and-result">9. Option and Result</h2>
+    <p>These two types are how Lace handles situations where something might not work out.</p>
+    <p><strong>Option</strong> represents a value that might or might not exist:</p>
+    <pre><code><span class="cmt"># Some(value) means "yes, there's a value"</span>
+<span class="cmt"># None means "nope, nothing here"</span>
+
+<span class="kw">let</span> first = List.first([<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>])   <span class="cmt"># Some(1)</span>
+<span class="kw">let</span> empty = List.first([])          <span class="cmt"># None</span></code></pre>
+    <p>Use <code>Option.unwrap_or</code> to get the value, with a fallback if it's <code>None</code>:</p>
+    <pre><code><span class="kw">let</span> val = Option.unwrap_or(List.first([]), <span class="num">0</span>)  <span class="cmt"># 0, because the list is empty</span></code></pre>
+    <p><strong>Result</strong> represents an operation that either succeeded or failed:</p>
+    <pre><code><span class="cmt"># Ok(value) means "it worked, here's the result"</span>
+<span class="cmt"># Err(message) means "it failed, here's why"</span></code></pre>
+    <p>
+      The <code>?</code> operator is the key to working with Results cleanly. When you put <code>?</code> after an expression that returns a <code>Result</code>, it means: "if this is <code>Ok</code>, give me the value and keep going; if it's <code>Err</code>, stop and return that error immediately."
+    </p>
+    <pre><code><span class="kw">fn</span> fetch_user_name() -&gt; Result {
+  <span class="kw">let</span> response = Http.get(<span class="str">"https://api.example.com/user"</span>)?
+  <span class="kw">let</span> body = Json.parse(response.body)?
+  <span class="kw">let</span> name = Json.get(body, <span class="str">"name"</span>)?
+  <span class="kw">Ok</span>(name)
+}</code></pre>
+    <p>
+      Without <code>?</code>, you'd have to manually check every single Result. With it, you write code that <em>reads</em> like happy-path code, but automatically handles failures. It's one of Lace's best features.
+    </p>
+
+    <hr />
+
+    <h2 id="closures">10. Closures</h2>
+    <p>
+      A <strong>closure</strong> is an anonymous (unnamed) function — a function you define inline and pass around like a value. You've already seen them in the <code>List.map</code> examples:
+    </p>
+    <pre><code><span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">2</span> }</code></pre>
+    <p>This is a function with no name that takes an <code>Int</code> and returns an <code>Int</code>. You can store it in a variable:</p>
+    <pre><code><span class="kw">let</span> double = <span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">2</span> }
+<span class="kw">let</span> triple = <span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">3</span> }
+
+print(double(<span class="num">5</span>))  <span class="cmt"># 10</span>
+print(triple(<span class="num">5</span>))  <span class="cmt"># 15</span></code></pre>
+    <p>Or pass it directly to another function:</p>
+    <pre><code><span class="kw">let</span> numbers = [<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>, <span class="num">4</span>, <span class="num">5</span>]
+
+<span class="kw">let</span> doubled = numbers |&gt; List.map(<span class="kw">fn</span>(x: Int) -&gt; Int { x * <span class="num">2</span> })
+<span class="kw">let</span> squared = numbers |&gt; List.map(<span class="kw">fn</span>(x: Int) -&gt; Int { x * x })
+
+<span class="cmt"># doubled: [2, 4, 6, 8, 10]</span>
+<span class="cmt"># squared: [1, 4, 9, 16, 25]</span></code></pre>
+    <p>Closures are what make <code>List.map</code> and <code>List.filter</code> flexible. You define the <em>what</em>, the library provides the <em>how</em>.</p>
+
+    <hr />
+
+    <h2 id="match">11. Match</h2>
+    <p>
+      <strong>Match</strong> is pattern matching — a smarter, more exhaustive version of <code>if/else</code>. It's especially useful with <code>Option</code> and <code>Result</code>:
+    </p>
+    <pre><code><span class="kw">let</span> maybe_value = List.first([<span class="num">10</span>, <span class="num">20</span>, <span class="num">30</span>])
+
+<span class="kw">let</span> result = <span class="kw">match</span> maybe_value {
+  <span class="kw">Some</span>(x) =&gt; <span class="str">"Got a value: "</span> ++ x,
+  <span class="kw">None</span>    =&gt; <span class="str">"List was empty"</span>
+}
+
+print(result)  <span class="cmt"># Got a value: 10</span></code></pre>
+    <p>Match with a Result:</p>
+    <pre><code><span class="kw">fn</span> describe_result(r: Result) -&gt; String {
+  <span class="kw">match</span> r {
+    <span class="kw">Ok</span>(val)  =&gt; <span class="str">"Success: "</span> ++ val,
+    <span class="kw">Err</span>(msg) =&gt; <span class="str">"Failure: "</span> ++ msg
+  }
+}</code></pre>
+    <p>Match on plain values:</p>
+    <pre><code><span class="kw">fn</span> day_name(n: Int) -&gt; String {
+  <span class="kw">match</span> n {
+    <span class="num">1</span> =&gt; <span class="str">"Monday"</span>,
+    <span class="num">2</span> =&gt; <span class="str">"Tuesday"</span>,
+    <span class="num">3</span> =&gt; <span class="str">"Wednesday"</span>,
+    <span class="num">4</span> =&gt; <span class="str">"Thursday"</span>,
+    <span class="num">5</span> =&gt; <span class="str">"Friday"</span>,
+    <span class="num">6</span> =&gt; <span class="str">"Saturday"</span>,
+    <span class="num">7</span> =&gt; <span class="str">"Sunday"</span>,
+    _ =&gt; <span class="str">"That's not a day"</span>
+  }
+}</code></pre>
+    <p>
+      The <code>_</code> is a catch-all — it matches anything not covered by the cases above. Lace requires match expressions to be <strong>exhaustive</strong> — you must cover every possible case. If you forget one, the compiler will tell you before it becomes a runtime surprise at 2am.
+    </p>
+
+    <hr />
+
+    <h2 id="error-handling-decorators">12. Error Handling with Decorators</h2>
+    <p>
+      Lace gives you <strong>decorators</strong> — annotations you put above a function to modify its behavior. The two most useful ones for error handling are <code>@retry</code> and <code>@timeout</code>.
+    </p>
+    <p><code>@retry</code> automatically retries a function if it returns an <code>Err</code>:</p>
+    <pre><code><span class="dec">@retry</span>(max: <span class="num">3</span>)
+<span class="kw">fn</span> fetch_data(url: String) -&gt; Result {
+  Http.get(url)
+}</code></pre>
+    <p>If <code>Http.get</code> fails, Lace will retry it up to 3 times before giving up and returning the error. No try/catch, no manual loops.</p>
+    <p><code>@timeout</code> stops a function if it takes too long:</p>
+    <pre><code><span class="dec">@timeout</span>(seconds: <span class="num">5</span>)
+<span class="kw">fn</span> slow_api_call() -&gt; Result {
+  Http.get(<span class="str">"https://api.example.com/slow-endpoint"</span>)
+}</code></pre>
+    <p>Combine them for resilient network calls:</p>
+    <pre><code><span class="dec">@retry</span>(max: <span class="num">3</span>)
+<span class="dec">@timeout</span>(seconds: <span class="num">10</span>)
+<span class="kw">fn</span> reliable_fetch(url: String) -&gt; Result {
+  Http.get(url)
+}</code></pre>
+    <p>
+      This is the kind of thing that makes Lace useful for agentic work. When an AI is running code on your behalf, you want it to handle transient failures gracefully — not crash the whole pipeline because one API hiccuped.
+    </p>
+
+    <hr />
+
+    <h2 id="project-tip-calculator">13. Project: Tip Calculator</h2>
+    <p>Let's build something real. A tip calculator: give it a bill amount and tip percentage, get back the tip and total.</p>
+    <pre><code><span class="cmt">## Calculate the tip amount for a given bill and percentage</span>
+<span class="kw">fn</span> calculate_tip(bill: Float, tip_percent: Float) -&gt; Float {
+  bill * (tip_percent / <span class="num">100.0</span>)
+}
+
+<span class="cmt">## Calculate the total (bill + tip)</span>
+<span class="kw">fn</span> calculate_total(bill: Float, tip: Float) -&gt; Float {
+  bill + tip
+}
+
+<span class="cmt">## Format a float as a dollar string</span>
+<span class="kw">fn</span> format_dollars(amount: Float) -&gt; String {
+  <span class="str">"$"</span> ++ amount
+}
+
+<span class="cmt"># Main program</span>
+<span class="kw">let</span> bill = <span class="num">48.50</span>
+<span class="kw">let</span> tip_percent = <span class="num">18.0</span>
+
+<span class="kw">let</span> tip = calculate_tip(bill, tip_percent)
+<span class="kw">let</span> total = calculate_total(bill, tip)
+
+print(<span class="str">"Bill:  "</span> ++ format_dollars(bill))
+print(<span class="str">"Tip:   "</span> ++ format_dollars(tip))
+print(<span class="str">"Total: "</span> ++ format_dollars(total))</code></pre>
+    <p>Output:</p>
+    <pre><code>Bill:  $48.5
+Tip:   $8.73
+Total: $57.23</code></pre>
+    <p>
+      Notice how each function does exactly one thing. <code>calculate_tip</code> doesn't print anything. <code>format_dollars</code> doesn't do math. Each piece is small, testable, and reusable. This is good programming practice whether you're human or AI.
+    </p>
+
+    <hr />
+
+    <h2 id="project-word-counter">14. Project: Word Counter</h2>
+    <p>Count words in a string and find the most common ones. This uses lists, closures, and the pipe operator:</p>
+    <pre><code><span class="cmt">## Split a string into words</span>
+<span class="kw">fn</span> split_words(text: String) -&gt; List {
+  String.split(text, <span class="str">" "</span>)
+}
+
+<span class="cmt">## Count occurrences of each word</span>
+<span class="kw">fn</span> count_words(words: List) -&gt; Map {
+  words |&gt; List.reduce(Map.empty(), <span class="kw">fn</span>(acc: Map, word: String) -&gt; Map {
+    <span class="kw">let</span> current = Map.get(acc, word) |&gt; Option.unwrap_or(<span class="num">0</span>)
+    Map.set(acc, word, current + <span class="num">1</span>)
+  })
+}
+
+<span class="cmt">## Get the top N entries from a word count map</span>
+<span class="kw">fn</span> top_words(counts: Map, n: Int) -&gt; List {
+  Map.entries(counts)
+    |&gt; List.sort_by(<span class="kw">fn</span>(entry: Pair) -&gt; Int { entry.second })
+    |&gt; List.reverse()
+    |&gt; List.take(n)
+}
+
+<span class="cmt"># Main program</span>
+<span class="kw">let</span> text = <span class="str">"the quick brown fox jumps over the lazy dog the fox"</span>
+<span class="kw">let</span> words = split_words(text)
+<span class="kw">let</span> counts = count_words(words)
+<span class="kw">let</span> top3 = top_words(counts, <span class="num">3</span>)
+
+print(<span class="str">"Word counts (top 3):"</span>)
+top3 |&gt; List.map(<span class="kw">fn</span>(entry: Pair) -&gt; String {
+  entry.first ++ <span class="str">": "</span> ++ entry.second
+}) |&gt; List.map(print)</code></pre>
+    <p>Output:</p>
+    <pre><code>Word counts (top 3):
+the: 3
+fox: 2
+quick: 1</code></pre>
+    <p>
+      The pipeline style keeps things readable. Each <code>|&gt;</code> is a transformation step, and you can follow the data as it flows from raw text to final answer.
+    </p>
+
+    <hr />
+
+    <h2 id="project-fetch-json">15. Project: Fetch and Parse JSON</h2>
+    <p>The most "agentic" example — hit a real API, parse the response, print a field. Uses <code>Http.get</code>, <code>Json.parse</code>, <code>Json.get</code>, and the <code>?</code> operator:</p>
+    <pre><code><span class="cmt">## Fetch a post from the JSONPlaceholder API and print its title</span>
+<span class="dec">@retry</span>(max: <span class="num">3</span>)
+<span class="dec">@timeout</span>(seconds: <span class="num">10</span>)
+<span class="kw">fn</span> get_post_title(post_id: Int) -&gt; Result {
+  <span class="kw">let</span> url = <span class="str">"https://jsonplaceholder.typicode.com/posts/"</span> ++ post_id
+  <span class="kw">let</span> response = Http.get(url)?
+  <span class="kw">let</span> json = Json.parse(response.body)?
+  <span class="kw">let</span> title = Json.get(json, <span class="str">"title"</span>)?
+  <span class="kw">Ok</span>(title)
+}
+
+<span class="cmt"># Main program</span>
+<span class="kw">let</span> result = get_post_title(<span class="num">1</span>)
+
+<span class="kw">match</span> result {
+  <span class="kw">Ok</span>(title) =&gt; print(<span class="str">"Post title: "</span> ++ title),
+  <span class="kw">Err</span>(msg)  =&gt; print(<span class="str">"Failed to fetch post: "</span> ++ msg)
+}</code></pre>
+    <p>Output:</p>
+    <pre><code>Post title: sunt aut facere repellat provident occaecati excepturi optio reprehenderit</code></pre>
+    <p>(JSONPlaceholder has, uh, <em>interesting</em> fake data.)</p>
+    <p>
+      Every <code>?</code> in <code>get_post_title</code> is an early return on failure. If the HTTP request fails, we stop and return an <code>Err</code>. If JSON parsing fails, same thing. The <code>match</code> at the bottom handles both outcomes explicitly — success or failure, Lace makes you deal with it. No exceptions bubbling up silently. No <code>undefined is not a function</code>.
+    </p>
+    <p>
+      The <code>@retry</code> and <code>@timeout</code> decorators mean this function is resilient to flaky networks — it'll try up to 3 times, and bail out after 10 seconds if something is truly stuck.
+    </p>
+
+    <hr />
+
+    <h2 id="where-next">Where to Go Next</h2>
+    <p>You've covered the core of Lace. You know how to:</p>
+    <ul>
+      <li>Define and call functions</li>
+      <li>Work with variables and types</li>
+      <li>Handle errors with <code>Result</code> and <code>Option</code></li>
+      <li>Transform lists with closures and pipes</li>
+      <li>Match on values exhaustively</li>
+      <li>Build resilient functions with decorators</li>
+    </ul>
+    <p>
+      The rest is practice. Take one of the three projects above and extend it. Add input validation to the tip calculator. Make the word counter handle punctuation. Add error messages to the API fetcher. Break things. Read the error messages (they're usually pretty good). Fix them.
+    </p>
+    <p>Lace was built to be used. Go use it.</p>
+
+    <hr />
+
+    <p><em>Tutorial written by Hermes. Directed by Gabe. Tested by neither of them nearly enough.</em></p>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <span>Apache-2.0</span>
+  <span>·</span>
+  <span>Built by Hermes</span>
+  <span>·</span>
+  <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub</a>
+</footer>
+
+</body>
+</html>

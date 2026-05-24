@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Language Reference — Lace 🧵</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="nav-logo" href="index.html">Lace 🧵</a>
+  <div class="nav-links">
+    <a href="tutorial.html">Tutorial</a>
+    <a href="reference.html" class="active">Reference</a>
+    <a href="stdlib.html">Stdlib</a>
+    <a href="cli.html">CLI</a>
+    <a href="lsp.html">LSP</a>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
+  </div>
+  <button class="hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')">&#9776;</button>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <ul>
+      <li><a href="#types">Types</a></li>
+      <li><a href="#expressions">Expressions</a></li>
+      <li><a href="#statements">Statements</a></li>
+      <li><a href="#functions">Functions</a></li>
+      <li><a href="#tools">Tools &amp; Effects</a></li>
+      <li><a href="#errors">Error Handling</a></li>
+      <li><a href="#records">Records &amp; Enums</a></li>
+      <li><a href="#modules">Modules</a></li>
+      <li><a href="#grammar">Grammar</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>Language Reference</h1>
+    <p>Lace is a statically-typed, effect-annotated language designed for agentic execution. Programs run on a lean interpreter or bytecode VM. The core design principle: <strong>make failure modes loud at compile time, not silent at runtime.</strong></p>
+
+    <h2 id="types">Types</h2>
+    <table>
+      <tr><th>Type</th><th>Description</th><th>Example</th></tr>
+      <tr><td><code>Int</code></td><td>64-bit signed integer</td><td><code>42</code>, <code>-7</code></td></tr>
+      <tr><td><code>Float</code></td><td>64-bit floating point</td><td><code>3.14</code></td></tr>
+      <tr><td><code>Bool</code></td><td>Boolean</td><td><code>true</code>, <code>false</code></td></tr>
+      <tr><td><code>String</code></td><td>UTF-8 string</td><td><code>"hello"</code></td></tr>
+      <tr><td><code>List&lt;T&gt;</code></td><td>Ordered homogeneous list</td><td><code>[1, 2, 3]</code></td></tr>
+      <tr><td><code>Map&lt;String, T&gt;</code></td><td>String-keyed map</td><td><code>{"a": 1}</code></td></tr>
+      <tr><td><code>Option&lt;T&gt;</code></td><td>Present or absent value</td><td><code>Some(x)</code>, <code>None</code></td></tr>
+      <tr><td><code>Result&lt;T, E&gt;</code></td><td>Success or failure</td><td><code>Ok(x)</code>, <code>Err(e)</code></td></tr>
+      <tr><td><code>Unit</code></td><td>No meaningful value</td><td>(implicit)</td></tr>
+      <tr><td>Records</td><td>Named field structs</td><td><code>record Point { x: Int, y: Int }</code></td></tr>
+    </table>
+    <p>There are no nulls in Lace. Absent values are always <code>Option&lt;T&gt;</code>.</p>
+
+    <h2 id="expressions">Expressions</h2>
+
+    <h3>Literals</h3>
+    <pre><code><span class="num">42</span>          <span class="cmt"># Int</span>
+<span class="num">3.14</span>        <span class="cmt"># Float</span>
+<span class="str">"hello"</span>     <span class="cmt"># String</span>
+<span class="kw">true</span>        <span class="cmt"># Bool</span>
+[<span class="num">1</span>, <span class="num">2</span>, <span class="num">3</span>]   <span class="cmt"># List&lt;Int&gt;</span>
+{<span class="str">"a"</span>: <span class="num">1</span>}    <span class="cmt"># Map&lt;String, Int&gt;</span></code></pre>
+
+    <h3>Operators</h3>
+    <table>
+      <tr><th>Operator</th><th>Description</th></tr>
+      <tr><td><code>+  -  *  /</code></td><td>Arithmetic (/ is float division)</td></tr>
+      <tr><td><code>//</code></td><td>Integer division</td></tr>
+      <tr><td><code>%</code></td><td>Remainder</td></tr>
+      <tr><td><code>++</code></td><td>String concatenation</td></tr>
+      <tr><td><code>==  !=  &lt;  &lt;=  &gt;  &gt;=</code></td><td>Comparison</td></tr>
+      <tr><td><code>&amp;&amp;  ||  !</code></td><td>Logic</td></tr>
+      <tr><td><code>|&gt;</code></td><td>Pipe (passes left as first argument to right)</td></tr>
+      <tr><td><code>?</code></td><td>Early return on Err/None (propagation operator)</td></tr>
+    </table>
+
+    <h3>Pipeline</h3>
+    <pre><code><span class="kw">let</span> result = files
+  |&gt; List.filter(<span class="kw">fn</span>(f) { f.extension == <span class="str">"lace"</span> })
+  |&gt; List.map(read_file)
+  |&gt; List.collect_results()</code></pre>
+
+    <h2 id="statements">Statements</h2>
+
+    <h3>let / mut</h3>
+    <pre><code><span class="kw">let</span> x = <span class="num">5</span>          <span class="cmt"># immutable binding</span>
+<span class="kw">let</span> <span class="kw">mut</span> y = <span class="num">5</span>      <span class="cmt"># mutable binding</span>
+y = y + <span class="num">1</span>          <span class="cmt"># reassign mutable</span></code></pre>
+
+    <h3>if / else</h3>
+    <pre><code><span class="kw">if</span> x &gt; <span class="num">0</span> {
+  print(<span class="str">"positive"</span>)
+} <span class="kw">else</span> <span class="kw">if</span> x == <span class="num">0</span> {
+  print(<span class="str">"zero"</span>)
+} <span class="kw">else</span> {
+  print(<span class="str">"negative"</span>)
+}</code></pre>
+
+    <h3>match</h3>
+    <pre><code><span class="kw">match</span> result {
+  <span class="kw">Ok</span>(value) =&gt; print(value),
+  <span class="kw">Err</span>(msg)  =&gt; print(<span class="str">"error: "</span> ++ msg),
+}</code></pre>
+
+    <h3>for / while</h3>
+    <pre><code><span class="kw">for</span> item <span class="kw">in</span> list {
+  print(item)
+}
+
+<span class="kw">while</span> x &gt; <span class="num">0</span> {
+  x = x - <span class="num">1</span>
+}</code></pre>
+
+    <h2 id="functions">Functions</h2>
+    <pre><code><span class="kw">fn</span> add(a: Int, b: Int) -&gt; Int {
+  a + b
+}
+
+<span class="cmt"># Closures</span>
+<span class="kw">let</span> double = <span class="kw">fn</span>(x: Int) { x * <span class="num">2</span> }
+
+<span class="cmt"># Higher-order</span>
+<span class="kw">fn</span> apply(f: <span class="kw">fn</span>(Int) -&gt; Int, x: Int) -&gt; Int {
+  f(x)
+}</code></pre>
+    <p><code>fn</code> declares a <strong>pure</strong> function — no I/O, no side effects. The type checker warns (W004) if a <code>fn</code> calls effectful operations. If you need I/O, use <code>tool</code>.</p>
+
+    <h2 id="tools">Tools &amp; Effects</h2>
+    <pre><code><span class="dec">@retry</span>(max: <span class="num">3</span>)
+<span class="kw">tool</span> fetch_user(id: Int) -&gt; Result&lt;String, String&gt; {
+  <span class="kw">let</span> body = Http.get(<span class="str">"https://api.example.com/users/"</span> ++ id.to_string())?
+  <span class="kw">let</span> data = Json.parse(body)?
+  Json.get(data, <span class="str">"name"</span>) |&gt; Option.unwrap_or(<span class="str">"unknown"</span>) |&gt; <span class="kw">Ok</span>
+}</code></pre>
+
+    <h3>tool vs fn</h3>
+    <table>
+      <tr><th></th><th><code>fn</code></th><th><code>tool</code></th></tr>
+      <tr><td>I/O allowed</td><td>No (W004 if you try)</td><td>Yes</td></tr>
+      <tr><td>Auto-logged</td><td>No</td><td>Yes (JSON to stderr)</td></tr>
+      <tr><td><code>@retry</code></td><td>No</td><td>Yes</td></tr>
+      <tr><td><code>@timeout</code></td><td>No</td><td>Yes</td></tr>
+      <tr><td>Sandboxable</td><td>N/A</td><td>Yes</td></tr>
+    </table>
+
+    <h3>Decorators</h3>
+    <table>
+      <tr><th>Decorator</th><th>Description</th></tr>
+      <tr><td><code>@retry(max: N)</code></td><td>Retry the tool up to N times on <code>Err</code>. Logs each retry attempt.</td></tr>
+      <tr><td><code>@timeout(ms: N)</code></td><td>Emit a warning if the tool takes longer than N milliseconds.</td></tr>
+    </table>
+
+    <h3>Automatic Tool Logging</h3>
+    <p>Every <code>tool</code> call automatically emits JSON to stderr:</p>
+    <pre><code>{"event":"tool_call","tool":"fetch_user","args":[42],"timestamp":1716000000000}
+{"event":"tool_ok","tool":"fetch_user","duration_ms":120}
+{"event":"tool_err","tool":"fetch_user","error":"connection refused","duration_ms":5}
+{"event":"tool_retry","tool":"fetch_user","attempt":2}</code></pre>
+    <p>Suppress with <code>lace run --no-tool-log</code>.</p>
+
+    <h2 id="errors">Error Handling</h2>
+    <p>Errors are values. No exceptions.</p>
+    <pre><code><span class="cmt"># Return Ok or Err</span>
+<span class="kw">fn</span> divide(a: Int, b: Int) -&gt; Result&lt;Int, String&gt; {
+  <span class="kw">if</span> b == <span class="num">0</span> {
+    <span class="kw">Err</span>(<span class="str">"division by zero"</span>)
+  } <span class="kw">else</span> {
+    <span class="kw">Ok</span>(a // b)
+  }
+}
+
+<span class="cmt"># ? propagates Err up the call stack</span>
+<span class="kw">fn</span> compute(a: Int, b: Int) -&gt; Result&lt;Int, String&gt; {
+  <span class="kw">let</span> result = divide(a, b)?   <span class="cmt"># returns Err early if divide fails</span>
+  <span class="kw">Ok</span>(result * <span class="num">2</span>)
+}</code></pre>
+
+    <h2 id="records">Records &amp; Enums</h2>
+    <pre><code><span class="kw">record</span> User {
+  name: String,
+  age: Int,
+}
+
+<span class="kw">let</span> u = User { name: <span class="str">"Alice"</span>, age: <span class="num">30</span> }
+print(u.name)</code></pre>
+
+    <h2 id="modules">Modules</h2>
+    <pre><code><span class="kw">import</span> utils         <span class="cmt"># imports utils.lace from same directory</span>
+<span class="kw">import</span> lib/helpers   <span class="cmt"># imports lib/helpers.lace</span></code></pre>
+    <p>Module resolution uses the <code>entry</code> field in <code>lace.toml</code> as the root. All imports are relative to the project root.</p>
+
+    <h2 id="grammar">Grammar (EBNF)</h2>
+    <pre><code>program     = { top_level } ;
+top_level   = fn_decl | tool_decl | record_decl | import_stmt | const_decl ;
+
+fn_decl     = { decorator } "fn" IDENT "(" params ")" "->" type block ;
+tool_decl   = { decorator } "tool" IDENT "(" params ")" "->" type block ;
+decorator   = "@" IDENT "(" decorator_args ")" ;
+
+params      = [ param { "," param } ] ;
+param       = IDENT ":" type ;
+
+type        = "Int" | "Float" | "Bool" | "String" | "Unit"
+            | "List" "&lt;" type "&gt;"
+            | "Map" "&lt;" type "," type "&gt;"
+            | "Option" "&lt;" type "&gt;"
+            | "Result" "&lt;" type "," type "&gt;"
+            | IDENT ;
+
+block       = "{" { stmt } "}" ;
+stmt        = let_stmt | assign_stmt | expr_stmt | return_stmt
+            | if_stmt | while_stmt | for_stmt | match_stmt ;
+
+let_stmt    = "let" [ "mut" ] IDENT [ ":" type ] "=" expr ";" ;
+return_stmt = "return" [ expr ] ";" ;
+expr_stmt   = expr ";" ;
+
+expr        = binary | unary | call | index | field
+            | closure | literal | IDENT | "(" expr ")" ;
+binary      = expr op expr ;
+op          = "+" | "-" | "*" | "/" | "//" | "%" | "++"
+            | "==" | "!=" | "&lt;" | "&lt;=" | "&gt;" | "&gt;="
+            | "&amp;&amp;" | "||" | "|&gt;" ;
+call        = expr "(" args ")" [ "?" ] ;
+
+literal     = INT | FLOAT | STRING | "true" | "false"
+            | "[" [ expr { "," expr } ] "]"
+            | "{" [ STRING ":" expr { "," STRING ":" expr } ] "}" ;</code></pre>
+  </main>
+</div>
+
+<footer>
+  <p>Apache-2.0 · Built by Hermes · <a href="https://github.com/gabecorsini/lace-lang">GitHub</a></p>
+</footer>
+</body>
+</html>

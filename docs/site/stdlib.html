@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Standard Library — Lace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="nav-logo" href="index.html">Lace 🧵</a>
+  <div class="nav-links">
+    <a href="tutorial.html">Tutorial</a>
+    <a href="reference.html">Reference</a>
+    <a href="stdlib.html">Stdlib</a>
+    <a href="cli.html">CLI</a>
+    <a href="lsp.html">LSP</a>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
+  </div>
+</nav>
+
+<div class="page-layout">
+
+  <aside class="sidebar">
+    <h3>Namespaces</h3>
+    <ul>
+      <li><a href="#core">Core</a></li>
+      <li><a href="#string">String</a></li>
+      <li><a href="#list">List</a></li>
+      <li><a href="#map">Map</a></li>
+      <li><a href="#option">Option</a></li>
+      <li><a href="#result">Result</a></li>
+      <li><a href="#math">Math</a></li>
+      <li><a href="#http">Http</a></li>
+      <li><a href="#json">Json</a></li>
+      <li><a href="#env">Env</a></li>
+      <li><a href="#file">File</a></li>
+    </ul>
+  </aside>
+
+  <main class="main-content">
+    <h1>Standard Library</h1>
+    <p class="lead">
+      Lace ships with a comprehensive standard library organized into namespaces.
+      Core builtins are available globally; all other functions are accessed via
+      their namespace prefix (e.g. <code>String.len(s)</code>).
+    </p>
+
+    <!-- ───────────────────────────── CORE ───────────────────────────── -->
+    <section id="core">
+      <h2>Core</h2>
+      <p>
+        Core builtins are available in every Lace program without any import or
+        namespace prefix. They cover output, assertions, and basic reflection.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>print</code></td>
+            <td><code>print(v: Any) -&gt; Unit</code></td>
+            <td>Prints a value to stdout without a trailing newline.</td>
+          </tr>
+          <tr>
+            <td><code>println</code></td>
+            <td><code>println(v: Any) -&gt; Unit</code></td>
+            <td>Prints a value to stdout followed by a newline.</td>
+          </tr>
+          <tr>
+            <td><code>assert</code></td>
+            <td><code>assert(cond: Bool) -&gt; Unit</code></td>
+            <td>Panics with an assertion error if <code>cond</code> is false.</td>
+          </tr>
+          <tr>
+            <td><code>assert_eq</code></td>
+            <td><code>assert_eq(a: T, b: T) -&gt; Unit</code></td>
+            <td>Panics with a diff message if <code>a != b</code>.</td>
+          </tr>
+          <tr>
+            <td><code>to_string</code></td>
+            <td><code>to_string(v: Any) -&gt; String</code></td>
+            <td>Returns the string representation of any value.</td>
+          </tr>
+          <tr>
+            <td><code>type_of</code></td>
+            <td><code>type_of(v: Any) -&gt; String</code></td>
+            <td>Returns the runtime type name of a value as a string.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let x = 42
+println(x)                      // 42
+println(to_string(x))           // "42"
+println(type_of(x))             // "Int"
+assert(x > 0)
+assert_eq(x, 42)</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── STRING ───────────────────────────── -->
+    <section id="string">
+      <h2>String</h2>
+      <p>
+        Functions for inspecting, transforming, and parsing strings.
+        Strings in Lace are UTF-8 encoded and immutable.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>String.len</code></td>
+            <td><code>len(s: String) -&gt; Int</code></td>
+            <td>Returns the number of characters in the string.</td>
+          </tr>
+          <tr>
+            <td><code>String.split</code></td>
+            <td><code>split(s: String, sep: String) -&gt; List&lt;String&gt;</code></td>
+            <td>Splits the string on every occurrence of <code>sep</code>.</td>
+          </tr>
+          <tr>
+            <td><code>String.join</code></td>
+            <td><code>join(list: List&lt;String&gt;, sep: String) -&gt; String</code></td>
+            <td>Joins a list of strings with <code>sep</code> between each element.</td>
+          </tr>
+          <tr>
+            <td><code>String.trim</code></td>
+            <td><code>trim(s: String) -&gt; String</code></td>
+            <td>Removes leading and trailing whitespace.</td>
+          </tr>
+          <tr>
+            <td><code>String.starts_with</code></td>
+            <td><code>starts_with(s: String, prefix: String) -&gt; Bool</code></td>
+            <td>Returns true if <code>s</code> begins with <code>prefix</code>.</td>
+          </tr>
+          <tr>
+            <td><code>String.ends_with</code></td>
+            <td><code>ends_with(s: String, suffix: String) -&gt; Bool</code></td>
+            <td>Returns true if <code>s</code> ends with <code>suffix</code>.</td>
+          </tr>
+          <tr>
+            <td><code>String.replace</code></td>
+            <td><code>replace(s: String, from: String, to: String) -&gt; String</code></td>
+            <td>Replaces all occurrences of <code>from</code> with <code>to</code>.</td>
+          </tr>
+          <tr>
+            <td><code>String.to_upper</code></td>
+            <td><code>to_upper(s: String) -&gt; String</code></td>
+            <td>Returns an uppercase copy of the string.</td>
+          </tr>
+          <tr>
+            <td><code>String.to_lower</code></td>
+            <td><code>to_lower(s: String) -&gt; String</code></td>
+            <td>Returns a lowercase copy of the string.</td>
+          </tr>
+          <tr>
+            <td><code>String.contains</code></td>
+            <td><code>contains(s: String, sub: String) -&gt; Bool</code></td>
+            <td>Returns true if <code>sub</code> is a substring of <code>s</code>.</td>
+          </tr>
+          <tr>
+            <td><code>String.char_at</code></td>
+            <td><code>char_at(s: String, i: Int) -&gt; Option&lt;String&gt;</code></td>
+            <td>Returns the character at index <code>i</code>, or <code>None</code> if out of bounds.</td>
+          </tr>
+          <tr>
+            <td><code>String.parse_int</code></td>
+            <td><code>parse_int(s: String) -&gt; Result&lt;Int, String&gt;</code></td>
+            <td>Parses the string as an integer. Returns <code>Err</code> on failure.</td>
+          </tr>
+          <tr>
+            <td><code>String.parse_float</code></td>
+            <td><code>parse_float(s: String) -&gt; Result&lt;Float, String&gt;</code></td>
+            <td>Parses the string as a float. Returns <code>Err</code> on failure.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let s = "  Hello, World!  "
+println(String.trim(s))                   // "Hello, World!"
+println(String.to_upper("hello"))         // "HELLO"
+println(String.split("a,b,c", ","))       // ["a", "b", "c"]
+println(String.join(["x", "y", "z"], "-")) // "x-y-z"
+println(String.contains(s, "World"))      // true
+println(String.char_at("abc", 1))         // Some("b")
+
+let n = String.parse_int("42")
+match n {
+  Ok(v)  => println(v)
+  Err(e) => println("Parse error: " + e)
+}</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── LIST ───────────────────────────── -->
+    <section id="list">
+      <h2>List</h2>
+      <p>
+        Ordered, immutable sequences. All transformations return a new list.
+        Lists are generic — <code>List&lt;T&gt;</code> can hold any element type.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>List.map</code></td>
+            <td><code>map(list: List&lt;A&gt;, fn: A -&gt; B) -&gt; List&lt;B&gt;</code></td>
+            <td>Applies <code>fn</code> to every element, returning a new list.</td>
+          </tr>
+          <tr>
+            <td><code>List.filter</code></td>
+            <td><code>filter(list: List&lt;T&gt;, fn: T -&gt; Bool) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns elements for which <code>fn</code> returns true.</td>
+          </tr>
+          <tr>
+            <td><code>List.fold</code></td>
+            <td><code>fold(list: List&lt;A&gt;, init: B, fn: (B, A) -&gt; B) -&gt; B</code></td>
+            <td>Left-folds the list into a single accumulated value.</td>
+          </tr>
+          <tr>
+            <td><code>List.len</code></td>
+            <td><code>len(list: List&lt;T&gt;) -&gt; Int</code></td>
+            <td>Returns the number of elements in the list.</td>
+          </tr>
+          <tr>
+            <td><code>List.push</code></td>
+            <td><code>push(list: List&lt;T&gt;, v: T) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns a new list with <code>v</code> appended at the end.</td>
+          </tr>
+          <tr>
+            <td><code>List.pop</code></td>
+            <td><code>pop(list: List&lt;T&gt;) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns a new list with the last element removed.</td>
+          </tr>
+          <tr>
+            <td><code>List.get</code></td>
+            <td><code>get(list: List&lt;T&gt;, i: Int) -&gt; Option&lt;T&gt;</code></td>
+            <td>Returns <code>Some(element)</code> at index <code>i</code>, or <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>List.contains</code></td>
+            <td><code>contains(list: List&lt;T&gt;, v: T) -&gt; Bool</code></td>
+            <td>Returns true if the list contains <code>v</code>.</td>
+          </tr>
+          <tr>
+            <td><code>List.sort</code></td>
+            <td><code>sort(list: List&lt;T&gt;) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns a sorted copy (ascending, natural order).</td>
+          </tr>
+          <tr>
+            <td><code>List.reverse</code></td>
+            <td><code>reverse(list: List&lt;T&gt;) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns the list in reversed order.</td>
+          </tr>
+          <tr>
+            <td><code>List.zip</code></td>
+            <td><code>zip(a: List&lt;A&gt;, b: List&lt;B&gt;) -&gt; List&lt;(A, B)&gt;</code></td>
+            <td>Pairs elements by position. Truncates to the shorter list.</td>
+          </tr>
+          <tr>
+            <td><code>List.flatten</code></td>
+            <td><code>flatten(list: List&lt;List&lt;T&gt;&gt;) -&gt; List&lt;T&gt;</code></td>
+            <td>Concatenates a list of lists into a single flat list.</td>
+          </tr>
+          <tr>
+            <td><code>List.sum</code></td>
+            <td><code>sum(list: List&lt;Float&gt;) -&gt; Float</code></td>
+            <td>Returns the sum of all numeric elements.</td>
+          </tr>
+          <tr>
+            <td><code>List.max</code></td>
+            <td><code>max(list: List&lt;T&gt;) -&gt; T</code></td>
+            <td>Returns the maximum element. Panics on empty list.</td>
+          </tr>
+          <tr>
+            <td><code>List.min</code></td>
+            <td><code>min(list: List&lt;T&gt;) -&gt; T</code></td>
+            <td>Returns the minimum element. Panics on empty list.</td>
+          </tr>
+          <tr>
+            <td><code>List.is_empty</code></td>
+            <td><code>is_empty(list: List&lt;T&gt;) -&gt; Bool</code></td>
+            <td>Returns true if the list has no elements.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let nums = [1, 2, 3, 4, 5]
+
+let doubled = List.map(nums, fn(x) => x * 2)     // [2, 4, 6, 8, 10]
+let evens   = List.filter(nums, fn(x) => x % 2 == 0) // [2, 4]
+let total   = List.fold(nums, 0, fn(acc, x) => acc + x) // 15
+
+println(List.len(nums))       // 5
+println(List.sum(nums))       // 15.0
+println(List.reverse(nums))   // [5, 4, 3, 2, 1]
+
+let pairs = List.zip([1, 2, 3], ["a", "b", "c"])  // [(1,"a"), (2,"b"), (3,"c")]</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── MAP ───────────────────────────── -->
+    <section id="map">
+      <h2>Map</h2>
+      <p>
+        Key-value store with string keys. Maps are immutable — all mutations
+        return a new map. Useful for structured data and configuration.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Map.get</code></td>
+            <td><code>get(map: Map, key: String) -&gt; Option&lt;T&gt;</code></td>
+            <td>Returns <code>Some(value)</code> for the key, or <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Map.insert</code></td>
+            <td><code>insert(map: Map, key: String, val: T) -&gt; Map</code></td>
+            <td>Returns a new map with <code>key</code> set to <code>val</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Map.remove</code></td>
+            <td><code>remove(map: Map, key: String) -&gt; Map</code></td>
+            <td>Returns a new map with <code>key</code> removed.</td>
+          </tr>
+          <tr>
+            <td><code>Map.keys</code></td>
+            <td><code>keys(map: Map) -&gt; List&lt;String&gt;</code></td>
+            <td>Returns all keys as a list.</td>
+          </tr>
+          <tr>
+            <td><code>Map.values</code></td>
+            <td><code>values(map: Map) -&gt; List</code></td>
+            <td>Returns all values as a list.</td>
+          </tr>
+          <tr>
+            <td><code>Map.contains_key</code></td>
+            <td><code>contains_key(map: Map, key: String) -&gt; Bool</code></td>
+            <td>Returns true if the map contains the given key.</td>
+          </tr>
+          <tr>
+            <td><code>Map.len</code></td>
+            <td><code>len(map: Map) -&gt; Int</code></td>
+            <td>Returns the number of key-value pairs in the map.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let m = { "name": "Alice", "age": "30" }
+
+println(Map.get(m, "name"))          // Some("Alice")
+println(Map.contains_key(m, "city")) // false
+
+let m2 = Map.insert(m, "city", "Paris")
+println(Map.keys(m2))                // ["name", "age", "city"]
+println(Map.len(m2))                 // 3
+
+let m3 = Map.remove(m2, "age")
+println(Map.keys(m3))                // ["name", "city"]</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── OPTION ───────────────────────────── -->
+    <section id="option">
+      <h2>Option</h2>
+      <p>
+        Represents an optional value — either <code>Some(v)</code> containing a
+        value, or <code>None</code>. Use Options instead of null to make
+        absent-value handling explicit and safe.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Some</code></td>
+            <td><code>Some(v: T) -&gt; Option&lt;T&gt;</code></td>
+            <td>Wraps a value in the <code>Some</code> variant.</td>
+          </tr>
+          <tr>
+            <td><code>None</code></td>
+            <td><code>None -&gt; Option&lt;T&gt;</code></td>
+            <td>Represents the absence of a value.</td>
+          </tr>
+          <tr>
+            <td><code>Option.unwrap</code></td>
+            <td><code>unwrap(opt: Option&lt;T&gt;) -&gt; T</code></td>
+            <td>Returns the inner value. Panics if <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Option.unwrap_or</code></td>
+            <td><code>unwrap_or(opt: Option&lt;T&gt;, default: T) -&gt; T</code></td>
+            <td>Returns the inner value, or <code>default</code> if <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Option.is_some</code></td>
+            <td><code>is_some(opt: Option&lt;T&gt;) -&gt; Bool</code></td>
+            <td>Returns true if the option contains a value.</td>
+          </tr>
+          <tr>
+            <td><code>Option.is_none</code></td>
+            <td><code>is_none(opt: Option&lt;T&gt;) -&gt; Bool</code></td>
+            <td>Returns true if the option is <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Option.map</code></td>
+            <td><code>map(opt: Option&lt;A&gt;, fn: A -&gt; B) -&gt; Option&lt;B&gt;</code></td>
+            <td>Applies <code>fn</code> if <code>Some</code>, passes <code>None</code> through.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let a = Some(10)
+let b = None
+
+println(Option.is_some(a))            // true
+println(Option.unwrap_or(b, 0))       // 0
+println(Option.map(a, fn(x) => x * 2)) // Some(20)
+
+match a {
+  Some(v) => println("Got: " + to_string(v))
+  None    => println("Nothing here")
+}</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── RESULT ───────────────────────────── -->
+    <section id="result">
+      <h2>Result</h2>
+      <p>
+        Represents the outcome of a fallible operation — either
+        <code>Ok(value)</code> on success or <code>Err(error)</code> on failure.
+        Functions that can fail (I/O, parsing, HTTP) return Results.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Ok</code></td>
+            <td><code>Ok(v: T) -&gt; Result&lt;T, E&gt;</code></td>
+            <td>Wraps a success value.</td>
+          </tr>
+          <tr>
+            <td><code>Err</code></td>
+            <td><code>Err(e: E) -&gt; Result&lt;T, E&gt;</code></td>
+            <td>Wraps an error value.</td>
+          </tr>
+          <tr>
+            <td><code>Result.unwrap</code></td>
+            <td><code>unwrap(res: Result&lt;T, E&gt;) -&gt; T</code></td>
+            <td>Returns the success value. Panics on <code>Err</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Result.unwrap_or</code></td>
+            <td><code>unwrap_or(res: Result&lt;T, E&gt;, default: T) -&gt; T</code></td>
+            <td>Returns the success value, or <code>default</code> on <code>Err</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Result.is_ok</code></td>
+            <td><code>is_ok(res: Result&lt;T, E&gt;) -&gt; Bool</code></td>
+            <td>Returns true if the result is <code>Ok</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Result.is_err</code></td>
+            <td><code>is_err(res: Result&lt;T, E&gt;) -&gt; Bool</code></td>
+            <td>Returns true if the result is <code>Err</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Result.map</code></td>
+            <td><code>map(res: Result&lt;A, E&gt;, fn: A -&gt; B) -&gt; Result&lt;B, E&gt;</code></td>
+            <td>Transforms the success value; passes errors through unchanged.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let r = String.parse_int("123")
+
+match r {
+  Ok(n)  => println("Parsed: " + to_string(n))
+  Err(e) => println("Error: " + e)
+}
+
+// Chaining with map
+let doubled = Result.map(r, fn(n) => n * 2)
+println(Result.unwrap_or(doubled, 0))   // 246
+
+// Safe default
+let bad = String.parse_int("abc")
+println(Result.unwrap_or(bad, -1))      // -1</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── MATH ───────────────────────────── -->
+    <section id="math">
+      <h2>Math</h2>
+      <p>
+        Common mathematical functions and constants. All trigonometric and
+        transcendental operations work with <code>Float</code> values.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Math.abs</code></td>
+            <td><code>abs(n: Float) -&gt; Float</code></td>
+            <td>Returns the absolute value of <code>n</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Math.floor</code></td>
+            <td><code>floor(n: Float) -&gt; Float</code></td>
+            <td>Rounds down to the nearest integer value.</td>
+          </tr>
+          <tr>
+            <td><code>Math.ceil</code></td>
+            <td><code>ceil(n: Float) -&gt; Float</code></td>
+            <td>Rounds up to the nearest integer value.</td>
+          </tr>
+          <tr>
+            <td><code>Math.sqrt</code></td>
+            <td><code>sqrt(n: Float) -&gt; Float</code></td>
+            <td>Returns the square root of <code>n</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Math.pow</code></td>
+            <td><code>pow(base: Float, exp: Float) -&gt; Float</code></td>
+            <td>Raises <code>base</code> to the power of <code>exp</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Math.log</code></td>
+            <td><code>log(n: Float) -&gt; Float</code></td>
+            <td>Returns the natural logarithm (base <em>e</em>) of <code>n</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Math.min</code></td>
+            <td><code>min(a: Float, b: Float) -&gt; Float</code></td>
+            <td>Returns the smaller of two numbers.</td>
+          </tr>
+          <tr>
+            <td><code>Math.max</code></td>
+            <td><code>max(a: Float, b: Float) -&gt; Float</code></td>
+            <td>Returns the larger of two numbers.</td>
+          </tr>
+          <tr>
+            <td><code>Math.round</code></td>
+            <td><code>round(n: Float) -&gt; Float</code></td>
+            <td>Rounds to the nearest integer (half rounds up).</td>
+          </tr>
+          <tr>
+            <td><code>Math.PI</code></td>
+            <td><code>PI: Float</code></td>
+            <td>The mathematical constant π ≈ 3.14159265…</td>
+          </tr>
+          <tr>
+            <td><code>Math.E</code></td>
+            <td><code>E: Float</code></td>
+            <td>Euler's number e ≈ 2.71828182…</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>println(Math.sqrt(16.0))          // 4.0
+println(Math.pow(2.0, 10.0))      // 1024.0
+println(Math.abs(-7.5))           // 7.5
+println(Math.floor(3.9))          // 3.0
+println(Math.ceil(3.1))           // 4.0
+println(Math.round(3.5))          // 4.0
+println(Math.PI)                  // 3.141592653589793
+
+let circumference = 2.0 * Math.PI * 5.0
+println(circumference)            // 31.41592653589793</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── HTTP ───────────────────────────── -->
+    <section id="http">
+      <h2>Http</h2>
+      <p>
+        Simple synchronous HTTP client for making web requests. All functions
+        return a <code>Result&lt;String, String&gt;</code> where the error string
+        contains the status code or network error message.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Http.get</code></td>
+            <td><code>get(url: String) -&gt; Result&lt;String, String&gt;</code></td>
+            <td>Sends an HTTP GET request and returns the response body.</td>
+          </tr>
+          <tr>
+            <td><code>Http.post</code></td>
+            <td><code>post(url: String, body: String) -&gt; Result&lt;String, String&gt;</code></td>
+            <td>Sends an HTTP POST request with a plain-text body.</td>
+          </tr>
+          <tr>
+            <td><code>Http.post_json</code></td>
+            <td><code>post_json(url: String, json: String) -&gt; Result&lt;String, String&gt;</code></td>
+            <td>Sends an HTTP POST with <code>Content-Type: application/json</code>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>// Simple GET request
+match Http.get("https://api.example.com/data") {
+  Ok(body)  => println(body)
+  Err(msg)  => println("Request failed: " + msg)
+}
+
+// POST with JSON payload
+let payload = Json.stringify({ "name": "Alice", "score": 99 })
+match Http.post_json("https://api.example.com/submit", payload) {
+  Ok(resp)  => println("Saved: " + resp)
+  Err(err)  => println("Error: " + err)
+}</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── JSON ───────────────────────────── -->
+    <section id="json">
+      <h2>Json</h2>
+      <p>
+        Parse JSON text into Lace values and serialize Lace values back to JSON
+        strings. Integrates naturally with the <a href="#http">Http</a> and
+        <a href="#file">File</a> namespaces.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Json.parse</code></td>
+            <td><code>parse(s: String) -&gt; Result&lt;Map, String&gt;</code></td>
+            <td>Parses a JSON string into a Lace Map. Returns <code>Err</code> on invalid JSON.</td>
+          </tr>
+          <tr>
+            <td><code>Json.stringify</code></td>
+            <td><code>stringify(v: Any) -&gt; String</code></td>
+            <td>Serializes a Lace value to a compact JSON string.</td>
+          </tr>
+          <tr>
+            <td><code>Json.get</code></td>
+            <td><code>get(map: Map, key: String) -&gt; Option&lt;Value&gt;</code></td>
+            <td>Retrieves a field from a parsed JSON map.</td>
+          </tr>
+          <tr>
+            <td><code>Json.keys</code></td>
+            <td><code>keys(map: Map) -&gt; List&lt;String&gt;</code></td>
+            <td>Returns the top-level keys of a parsed JSON object.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let raw = "{\"name\": \"Alice\", \"age\": 30}"
+
+match Json.parse(raw) {
+  Ok(obj) => {
+    let name = Option.unwrap(Json.get(obj, "name"))
+    println("Hello, " + to_string(name))    // Hello, Alice
+    println(Json.keys(obj))                  // ["name", "age"]
+  }
+  Err(e)  => println("Parse error: " + e)
+}
+
+// Serialize back to JSON
+let data = { "x": 1, "y": 2 }
+println(Json.stringify(data))   // {"x":1,"y":2}</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── ENV ───────────────────────────── -->
+    <section id="env">
+      <h2>Env</h2>
+      <p>
+        Read and write process environment variables. Environment variables are
+        global to the running process and affect child processes spawned after
+        the call to <code>Env.set</code>.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Env.get</code></td>
+            <td><code>get(key: String) -&gt; Option&lt;String&gt;</code></td>
+            <td>Returns the value of an environment variable, or <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Env.set</code></td>
+            <td><code>set(key: String, val: String) -&gt; Unit</code></td>
+            <td>Sets an environment variable for the current process.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>// Read an environment variable with a fallback
+let home = Option.unwrap_or(Env.get("HOME"), "/tmp")
+println("Home directory: " + home)
+
+// Check for an API key
+match Env.get("API_KEY") {
+  Some(key) => println("Key loaded, length: " + to_string(String.len(key)))
+  None      => println("Warning: API_KEY not set")
+}
+
+// Set a variable
+Env.set("APP_ENV", "production")</code></pre>
+      </div>
+    </section>
+
+    <!-- ───────────────────────────── FILE ───────────────────────────── -->
+    <section id="file">
+      <h2>File</h2>
+      <p>
+        Basic filesystem operations: reading, writing, and checking for
+        existence. Paths may be absolute or relative to the working directory
+        of the running process.
+      </p>
+      <table class="fn-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>File.read</code></td>
+            <td><code>read(path: String) -&gt; Result&lt;String, String&gt;</code></td>
+            <td>Reads the entire file as a UTF-8 string. Returns <code>Err</code> if the file cannot be read.</td>
+          </tr>
+          <tr>
+            <td><code>File.write</code></td>
+            <td><code>write(path: String, content: String) -&gt; Result&lt;Unit, String&gt;</code></td>
+            <td>Writes (or overwrites) a file with the given content. Creates the file if it does not exist.</td>
+          </tr>
+          <tr>
+            <td><code>File.exists</code></td>
+            <td><code>exists(path: String) -&gt; Bool</code></td>
+            <td>Returns true if a file or directory exists at the given path.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>// Check before reading
+if File.exists("config.json") {
+  match File.read("config.json") {
+    Ok(contents) => {
+      let cfg = Result.unwrap(Json.parse(contents))
+      println("Config loaded")
+    }
+    Err(e) => println("Read error: " + e)
+  }
+} else {
+  println("config.json not found, using defaults")
+}
+
+// Write a file
+match File.write("output.txt", "Hello from Lace!\n") {
+  Ok(_)  => println("Written successfully")
+  Err(e) => println("Write failed: " + e)
+}</code></pre>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <p>Lace language &mdash; <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub</a></p>
+</footer>
+
+</body>
+</html>

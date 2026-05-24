@@ -38,7 +38,7 @@ jobs:
       - name: Build lace CLI
         run: cargo build --release -p lace-cli
 
-      - name: Generate docs
+      - name: Generate API docs
         run: ./target/release/lace doc examples/
 
       - name: Setup Pages
@@ -47,7 +47,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/
+          path: docs/site/
 
       - name: Deploy to GitHub Pages
         id: deployment

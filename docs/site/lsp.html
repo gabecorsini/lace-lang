@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LSP &amp; Editor Setup — Lace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<nav class="topnav">
+  <a class="nav-logo" href="index.html">Lace 🧵</a>
+  <div class="nav-links">
+    <a href="tutorial.html">Tutorial</a>
+    <a href="reference.html">Reference</a>
+    <a href="stdlib.html">Stdlib</a>
+    <a href="cli.html">CLI</a>
+    <a href="lsp.html">LSP</a>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
+  </div>
+</nav>
+
+<div class="page-layout">
+
+  <aside class="sidebar">
+    <h3>On this page</h3>
+    <ul>
+      <li><a href="#features">What the LSP provides</a></li>
+      <li><a href="#starting">Starting the server</a></li>
+      <li><a href="#neovim">Neovim</a></li>
+      <li><a href="#helix">Helix</a></li>
+      <li><a href="#zed">Zed</a></li>
+      <li><a href="#troubleshooting">Troubleshooting</a></li>
+    </ul>
+  </aside>
+
+  <main class="main-content">
+    <h1>LSP &amp; Editor Setup</h1>
+    <p class="lead">
+      The Lace Language Server implements the
+      <a href="https://microsoft.github.io/language-server-protocol/" target="_blank">Language Server Protocol (LSP)</a>
+      and is bundled directly into the <code>lace</code> binary. Any LSP-capable
+      editor can get rich Lace support with a few lines of configuration.
+    </p>
+
+    <!-- ─────────────────────────── FEATURES ─────────────────────────── -->
+    <section id="features">
+      <h2>What the LSP provides</h2>
+      <p>The Lace language server currently supports the following LSP features:</p>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>🔍 Hover</h3>
+          <p>
+            Hover over any symbol to see its inferred type and attached doc
+            comment. Works for local variables, function parameters, stdlib
+            functions, and user-defined functions.
+          </p>
+        </div>
+        <div class="feature-card">
+          <h3>✨ Completion</h3>
+          <p>
+            Context-aware autocompletion for all standard library namespaces
+            and functions, as well as every user-defined symbol visible in the
+            current scope. Trigger with your editor's usual completion key
+            (often <kbd>Ctrl</kbd>+<kbd>Space</kbd>).
+          </p>
+        </div>
+        <div class="feature-card">
+          <h3>⚠️ Diagnostics</h3>
+          <p>
+            Type errors, undefined variables, and lint warnings are reported
+            inline as you type. Diagnostics are re-run on every save (and on
+            most editors, on every keystroke).
+          </p>
+        </div>
+        <div class="feature-card">
+          <h3>🗺 Go-to-definition</h3>
+          <p>
+            Jump directly to where a function or variable is defined — including
+            across files in the same project. Use your editor's
+            <em>go to definition</em> command (typically <kbd>gd</kbd> in Neovim,
+            <kbd>gd</kbd> in Helix, <kbd>F12</kbd> in VS Code).
+          </p>
+        </div>
+        <div class="feature-card">
+          <h3>🖌 Formatting</h3>
+          <p>
+            Opinionated, deterministic formatting for <code>.lace</code> files.
+            The formatter respects a 2-space indent and enforces consistent
+            spacing around operators. Trigger via your editor's format command or
+            configure format-on-save.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────── STARTING ─────────────────────────── -->
+    <section id="starting">
+      <h2>Starting the server</h2>
+      <p>
+        The language server uses <strong>stdio transport</strong> — it reads
+        LSP messages from stdin and writes responses to stdout. You never need
+        to launch it manually; your editor spawns it automatically when you
+        open a <code>.lace</code> file.
+      </p>
+      <p>The command your editor must invoke is simply:</p>
+      <div class="code-block">
+        <div class="code-label">Shell</div>
+        <pre><code>lace lsp</code></pre>
+      </div>
+      <p>
+        The <code>lace</code> binary must be discoverable on your system
+        <code>PATH</code>. After installing via Cargo, confirm it is available:
+      </p>
+      <div class="code-block">
+        <div class="code-label">Shell</div>
+        <pre><code>$ lace --version
+lace 0.1.0</code></pre>
+      </div>
+      <p>
+        The server detects the project root by looking for a
+        <code>lace.toml</code> manifest or a <code>.git</code> directory,
+        walking up from the file being edited. Single-file mode is also
+        supported when no project root is found.
+      </p>
+    </section>
+
+    <!-- ─────────────────────────── NEOVIM ─────────────────────────── -->
+    <section id="neovim">
+      <h2>Neovim</h2>
+      <p>
+        The recommended setup uses
+        <a href="https://github.com/neovim/nvim-lspconfig" target="_blank">nvim-lspconfig</a>.
+        Because Lace is not yet in the upstream lspconfig registry, you register
+        the server manually.
+      </p>
+
+      <h3>Prerequisites</h3>
+      <ul>
+        <li>Neovim 0.8 or later</li>
+        <li><a href="https://github.com/neovim/nvim-lspconfig" target="_blank">nvim-lspconfig</a> installed</li>
+        <li>
+          <em>(Optional)</em>
+          <a href="https://github.com/hrsh7th/nvim-cmp" target="_blank">nvim-cmp</a>
+          + <code>cmp-nvim-lsp</code> for full completion UI
+        </li>
+        <li><code>lace</code> binary on PATH</li>
+      </ul>
+
+      <h3>Configuration</h3>
+      <p>
+        Add the following to your <code>init.lua</code> or a dedicated
+        <code>lace.lua</code> file sourced from your config:
+      </p>
+      <div class="code-block">
+        <div class="code-label">init.lua / lace.lua</div>
+        <pre><code>-- Neovim LSP configuration for the Lace programming language
+-- Add this to your Neovim config (init.lua or a dedicated lace.lua file).
+--
+-- Prerequisites:
+--   1. Install lace: cargo install --path crates/lace-cli (or add `lace` to PATH)
+--   2. Install nvim-lspconfig: https://github.com/neovim/nvim-lspconfig
+--
+-- Usage: `lace lsp` is launched automatically when you open a *.lace file.
+
+local lspconfig = require("lspconfig")
+local configs = require("lspconfig.configs")
+
+-- Register the lace-lsp server if not already registered
+if not configs.lace_lsp then
+  configs.lace_lsp = {
+    default_config = {
+      cmd = { "lace", "lsp" },
+      filetypes = { "lace" },
+      root_dir = lspconfig.util.root_pattern("lace.toml", ".git"),
+      single_file_support = true,
+      settings = {},
+    },
+    docs = {
+      description = "Lace Language Server",
+      default_config = {
+        root_dir = [[root_pattern("lace.toml", ".git")]],
+      },
+    },
+  }
+end
+
+lspconfig.lace_lsp.setup({
+  on_attach = function(client, bufnr)
+    -- Key mappings (adjust to your preferences)
+    local opts = { noremap = true, silent = true, buffer = bufnr }
+    vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+    vim.keymap.set("n", "K",  vim.lsp.buf.hover, opts)
+    vim.keymap.set("n", "&lt;leader&gt;f", vim.lsp.buf.format, opts)
+    vim.keymap.set("n", "&lt;leader&gt;ca", vim.lsp.buf.code_action, opts)
+  end,
+  capabilities = require("cmp_nvim_lsp").default_capabilities(),  -- if using nvim-cmp
+})
+
+-- Register .lace file type (Neovim does not know about it by default)
+vim.filetype.add({
+  extension = {
+    lace = "lace",
+  },
+})</code></pre>
+      </div>
+
+      <h3>Key bindings (defaults)</h3>
+      <table class="fn-table">
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>gd</kbd></td><td>Go to definition</td></tr>
+          <tr><td><kbd>K</kbd></td><td>Show hover (type + docs)</td></tr>
+          <tr><td><kbd>&lt;leader&gt;f</kbd></td><td>Format buffer</td></tr>
+          <tr><td><kbd>&lt;leader&gt;ca</kbd></td><td>Code actions</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─────────────────────────── HELIX ─────────────────────────── -->
+    <section id="helix">
+      <h2>Helix</h2>
+      <p>
+        <a href="https://helix-editor.com/" target="_blank">Helix</a> has
+        built-in LSP support — no plugins required. Add the Lace language
+        definition and server configuration to your
+        <code>~/.config/helix/languages.toml</code>.
+      </p>
+
+      <h3>Prerequisites</h3>
+      <ul>
+        <li>Helix 23.05 or later</li>
+        <li><code>lace</code> binary on PATH</li>
+      </ul>
+
+      <h3>Configuration</h3>
+      <p>
+        Merge the following into <code>~/.config/helix/languages.toml</code>
+        (create the file if it does not exist):
+      </p>
+      <div class="code-block">
+        <div class="code-label">~/.config/helix/languages.toml</div>
+        <pre><code># Helix editor configuration for the Lace programming language
+#
+# Add this to your ~/.config/helix/languages.toml
+# (or merge it into an existing languages.toml)
+#
+# Prerequisites:
+#   - `lace` binary must be on PATH (cargo install --path crates/lace-cli)
+
+[[language]]
+name = "lace"
+scope = "source.lace"
+injection-regex = "lace"
+file-types = ["lace"]
+comment-token = "//"
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["lace-lsp"]
+roots = ["lace.toml"]
+
+[language-server.lace-lsp]
+command = "lace"
+args = ["lsp"]</code></pre>
+      </div>
+
+      <h3>Key bindings (Helix defaults)</h3>
+      <table class="fn-table">
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>gd</kbd></td><td>Go to definition</td></tr>
+          <tr><td><kbd>K</kbd></td><td>Show hover documentation</td></tr>
+          <tr><td><kbd>Space</kbd> <kbd>f</kbd></td><td>Format buffer</td></tr>
+          <tr><td><kbd>Space</kbd> <kbd>a</kbd></td><td>Code actions</td></tr>
+          <tr><td><kbd>Ctrl</kbd>+<kbd>Space</kbd></td><td>Trigger completion</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ─────────────────────────── ZED ─────────────────────────── -->
+    <section id="zed">
+      <h2>Zed</h2>
+      <p>
+        <a href="https://zed.dev/" target="_blank">Zed</a> supports extensions
+        that bundle language configuration and LSP wiring. Install the Lace
+        extension by dropping the following file into your Zed extensions folder.
+      </p>
+
+      <h3>Prerequisites</h3>
+      <ul>
+        <li>Zed 0.130 or later</li>
+        <li><code>lace</code> binary on PATH</li>
+      </ul>
+
+      <h3>Installation</h3>
+      <ol>
+        <li>Create the extension directory: <code>~/.config/zed/extensions/lace/</code></li>
+        <li>Save the snippet below as <code>extension.json</code> inside that directory.</li>
+        <li>Restart Zed. It will auto-detect the extension and start <code>lace lsp</code> when a <code>*.lace</code> file is opened.</li>
+      </ol>
+
+      <div class="code-block">
+        <div class="code-label">~/.config/zed/extensions/lace/extension.json</div>
+        <pre><code>// Zed editor extension snippet for the Lace programming language.
+//
+// To use:
+//   1. Create a Zed extension directory: ~/.config/zed/extensions/lace/
+//   2. Copy this file there as extension.json
+//   3. Make sure `lace` binary is on PATH
+//
+// Zed will auto-detect the extension and start `lace lsp` when a *.lace file is opened.
+
+{
+  "name": "Lace",
+  "version": "0.1.0",
+  "description": "Lace programming language support for Zed",
+  "authors": ["Gabe Corsini"],
+  "repository": "https://github.com/gcorsini/lace",
+
+  "languages": [
+    {
+      "name": "Lace",
+      "grammar": "lace",
+      "path_suffixes": ["lace"],
+      "line_comments": ["// "],
+      "block_comment": ["/*", "*/"],
+      "brackets": [
+        { "start": "{", "end": "}", "close": true, "newline": true },
+        { "start": "[", "end": "]", "close": true, "newline": false },
+        { "start": "(", "end": ")", "close": true, "newline": false }
+      ],
+      "indent_on_line_ends_with": ["{"],
+      "decrease_indent_pattern": "^\\s*}"
+    }
+  ],
+
+  "language_servers": [
+    {
+      "name": "lace-lsp",
+      "language": "Lace",
+      "command": "lace",
+      "args": ["lsp"],
+      "initialization_options": {}
+    }
+  ]
+}</code></pre>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────── TROUBLESHOOTING ─────────────────────────── -->
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+      <p>
+        If the LSP does not start, work through the checklist below before
+        filing a bug report.
+      </p>
+
+      <div class="trouble-list">
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            <code>lace</code> binary not found / not on PATH
+          </h3>
+          <p>
+            The most common issue. Verify the binary exists and is executable:
+          </p>
+          <div class="code-block">
+            <pre><code>$ which lace
+/home/you/.cargo/bin/lace
+
+$ lace --version
+lace 0.1.0</code></pre>
+          </div>
+          <p>
+            If <code>which lace</code> prints nothing, either install lace
+            (<code>cargo install --path crates/lace-cli</code>) or add its
+            directory to <code>PATH</code> in your shell profile
+            (<code>~/.bashrc</code>, <code>~/.zshrc</code>, etc.):
+          </p>
+          <div class="code-block">
+            <pre><code>export PATH="$HOME/.cargo/bin:$PATH"</code></pre>
+          </div>
+          <p>
+            Note: many editors launch with a minimal environment and do not
+            inherit your shell <code>PATH</code>. You may need to set
+            <code>PATH</code> in your editor's own configuration or use the
+            full absolute path to the binary (e.g.
+            <code>/home/you/.cargo/bin/lace</code>) in the LSP command field.
+          </p>
+        </div>
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            <code>lace lsp</code> subcommand not found
+          </h3>
+          <p>
+            This means you have an older <code>lace</code> binary installed
+            that pre-dates the LSP feature. Reinstall from the latest source:
+          </p>
+          <div class="code-block">
+            <pre><code>cargo install --path crates/lace-cli --force</code></pre>
+          </div>
+        </div>
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            LSP attaches but no completions or diagnostics appear
+          </h3>
+          <p>
+            Check that the filetype is being detected as <code>lace</code>.
+            In Neovim run <code>:set filetype?</code>; it should print
+            <code>filetype=lace</code>. If not, make sure the
+            <code>vim.filetype.add</code> call from the config snippet is
+            being executed.
+          </p>
+          <p>
+            In Helix, run <code>:lang</code> in command mode to confirm the
+            active language is <code>lace</code>.
+          </p>
+        </div>
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            Root directory not detected; cross-file features missing
+          </h3>
+          <p>
+            The server walks upward from the open file looking for
+            <code>lace.toml</code> or <code>.git</code>. If neither exists,
+            it falls back to single-file mode and cannot resolve imports or
+            provide cross-file go-to-definition.
+          </p>
+          <p>
+            Create a <code>lace.toml</code> at the project root (it can be
+            empty) to anchor the project:
+          </p>
+          <div class="code-block">
+            <pre><code>touch lace.toml</code></pre>
+          </div>
+        </div>
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            Viewing LSP logs
+          </h3>
+          <p>
+            <strong>Neovim:</strong> open the log with
+            <code>:LspLog</code> or inspect
+            <code>~/.local/state/nvim/lsp.log</code>.
+          </p>
+          <p>
+            <strong>Helix:</strong> start Helix with
+            <code>HELIX_LOG=lsp=debug hx myfile.lace</code> and check the
+            log at <code>~/.cache/helix/helix.log</code>.
+          </p>
+          <p>
+            <strong>Zed:</strong> open the debug panel via
+            <em>Help → Open Log File</em> and filter for
+            <code>lace</code>.
+          </p>
+        </div>
+
+        <div class="trouble-item">
+          <h3>
+            <span class="trouble-icon">⚡</span>
+            Still stuck?
+          </h3>
+          <p>
+            Open an issue on the
+            <a href="https://github.com/gabecorsini/lace-lang/issues" target="_blank">GitHub issue tracker</a>
+            and include:
+          </p>
+          <ul>
+            <li>Output of <code>lace --version</code></li>
+            <li>Your editor name and version</li>
+            <li>The relevant section of your LSP config</li>
+            <li>Any error messages from the LSP log</li>
+          </ul>
+        </div>
+
+      </div><!-- /.trouble-list -->
+    </section>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <p>Lace language &mdash; <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub</a></p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CLI Reference — Lace 🧵</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="nav-logo" href="index.html">Lace 🧵</a>
+  <div class="nav-links">
+    <a href="tutorial.html">Tutorial</a>
+    <a href="reference.html">Reference</a>
+    <a href="stdlib.html">Stdlib</a>
+    <a href="cli.html" class="active">CLI</a>
+    <a href="lsp.html">LSP</a>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
+  </div>
+  <button class="hamburger" onclick="document.querySelector('.nav-links').classList.toggle('open')">&#9776;</button>
+</nav>
+
+<div class="layout">
+  <aside class="sidebar">
+    <ul>
+      <li><a href="#quickstart">Quick Start</a></li>
+      <li><a href="#run">lace run</a></li>
+      <li><a href="#check">lace check</a></li>
+      <li><a href="#build">lace build</a></li>
+      <li><a href="#fmt">lace fmt</a></li>
+      <li><a href="#doc">lace doc</a></li>
+      <li><a href="#explain">lace explain</a></li>
+      <li><a href="#lsp">lace lsp</a></li>
+      <li><a href="#new">lace new</a></li>
+      <li><a href="#compile">lace compile</a></li>
+      <li><a href="#vm">lace vm</a></li>
+      <li><a href="#codes">Error Codes</a></li>
+      <li><a href="#toml">lace.toml</a></li>
+    </ul>
+  </aside>
+
+  <main class="content">
+    <h1>CLI Reference</h1>
+    <p>The <code>lace</code> CLI is the primary interface for working with Lace programs — running, checking, formatting, building docs, and serving the LSP.</p>
+
+    <h2 id="quickstart">Quick Start</h2>
+    <pre><code>cargo build --workspace
+./target/debug/lace new myproject
+cd myproject
+./target/debug/lace run src/main.lace</code></pre>
+
+    <h2 id="run">lace run</h2>
+    <p>Run a <code>.lace</code> source file through the interpreter (or bytecode VM with <code>--vm</code>).</p>
+    <pre><code>lace run &lt;file&gt; [--no-warn] [--no-tool-log] [--vm]</code></pre>
+    <table>
+      <tr><th>Flag</th><th>Description</th></tr>
+      <tr><td><code>--no-warn</code></td><td>Suppress all warnings (W001–W004)</td></tr>
+      <tr><td><code>--no-tool-log</code></td><td>Suppress automatic JSON tool call logs on stderr</td></tr>
+      <tr><td><code>--vm</code></td><td>Use the bytecode VM instead of tree-walking interpreter</td></tr>
+    </table>
+    <pre><code>lace run src/main.lace
+lace run src/main.lace --no-tool-log
+lace run src/main.lace --vm</code></pre>
+
+    <h2 id="check">lace check</h2>
+    <p>Type-check a file without running it. Prints all errors and warnings, exits non-zero on errors.</p>
+    <pre><code>lace check &lt;file&gt; [--no-warn]</code></pre>
+    <pre><code>lace check src/main.lace</code></pre>
+
+    <h2 id="build">lace build</h2>
+    <p>Type-check the whole project defined in <code>lace.toml</code>. Reports file count and item count.</p>
+    <pre><code>lace build [--no-warn]</code></pre>
+    <pre><code>lace build
+# checked 3 files, 12 items — no errors</code></pre>
+
+    <h2 id="fmt">lace fmt</h2>
+    <p>Format a <code>.lace</code> file in place. Idempotent — formatted files are unchanged on re-run.</p>
+    <pre><code>lace fmt &lt;file&gt;</code></pre>
+    <pre><code>lace fmt src/main.lace</code></pre>
+
+    <h2 id="doc">lace doc</h2>
+    <p>Generate HTML documentation from <code>##</code> doc comments. Outputs to <code>docs/</code>.</p>
+    <pre><code>lace doc [path]</code></pre>
+    <pre><code>lace doc examples/
+lace doc src/main.lace</code></pre>
+
+    <h2 id="explain">lace explain</h2>
+    <p>Print a detailed explanation of an error or warning code.</p>
+    <pre><code>lace explain &lt;code&gt;</code></pre>
+    <pre><code>lace explain E001
+lace explain W004</code></pre>
+
+    <h2 id="lsp">lace lsp</h2>
+    <p>Start the LSP server on stdio. Editors invoke this as a subprocess — you don't run it directly.</p>
+    <pre><code>lace lsp</code></pre>
+    <p>See the <a href="lsp.html">LSP & Editor Setup</a> page for configuration instructions.</p>
+
+    <h2 id="new">lace new</h2>
+    <p>Scaffold a new Lace project with <code>lace.toml</code> and <code>src/main.lace</code>.</p>
+    <pre><code>lace new &lt;name&gt;</code></pre>
+    <pre><code>lace new myproject
+# Created myproject/lace.toml
+# Created myproject/src/main.lace</code></pre>
+
+    <h2 id="compile">lace compile</h2>
+    <p>Compile a <code>.lace</code> file to a <code>.lacec</code> bytecode file in the same directory.</p>
+    <pre><code>lace compile &lt;file&gt;</code></pre>
+    <pre><code>lace compile src/main.lace
+# compiled: src/main.lacec</code></pre>
+
+    <h2 id="vm">lace vm</h2>
+    <p>Run a <code>.lacec</code> bytecode file directly. Also accepts <code>.lace</code> (compile + run in one step).</p>
+    <pre><code>lace vm &lt;file&gt;</code></pre>
+    <pre><code>lace vm src/main.lacec
+lace vm src/main.lace   # compiles on the fly</code></pre>
+
+    <h2 id="codes">Error &amp; Warning Codes</h2>
+    <table>
+      <tr><th>Code</th><th>Name</th><th>Description</th></tr>
+      <tr><td><code>E001</code></td><td>UnknownIdentifier</td><td>Variable or function not found in scope. Triggers "did you mean?" suggestions.</td></tr>
+      <tr><td><code>E002</code></td><td>TypeMismatch</td><td>Expression type doesn't match expected type.</td></tr>
+      <tr><td><code>E003</code></td><td>ArityMismatch</td><td>Wrong number of arguments to a function or tool call.</td></tr>
+      <tr><td><code>E004</code></td><td>NotCallable</td><td>Attempted to call something that isn't a function or tool.</td></tr>
+      <tr><td><code>E005</code></td><td>MissingField</td><td>Record field access on a field that doesn't exist.</td></tr>
+      <tr><td><code>W001</code></td><td>UnusedVariable</td><td>Variable declared but never read.</td></tr>
+      <tr><td><code>W002</code></td><td>UnreachableCode</td><td>Code after an unconditional return.</td></tr>
+      <tr><td><code>W003</code></td><td><em>reserved</em></td><td>—</td></tr>
+      <tr><td><code>W004</code></td><td>PureFnCallsEffectful</td><td>A <code>fn</code> calls a <code>tool</code> or effectful stdlib function. Consider declaring it as a <code>tool</code>.</td></tr>
+    </table>
+
+    <h2 id="toml">lace.toml</h2>
+    <p>Project manifest file. Place in the project root.</p>
+    <pre><code>[project]
+name = "myproject"
+version = "0.1.0"
+entry = "src/main.lace"</code></pre>
+    <table>
+      <tr><th>Field</th><th>Description</th></tr>
+      <tr><td><code>name</code></td><td>Project name (used in doc output and bundle metadata)</td></tr>
+      <tr><td><code>version</code></td><td>Semver string</td></tr>
+      <tr><td><code>entry</code></td><td>Path to the main entry file, relative to project root</td></tr>
+    </table>
+  </main>
+</div>
+
+<footer>
+  <p>Apache-2.0 · Built by Hermes · <a href="https://github.com/gabecorsini/lace-lang">GitHub</a></p>
+</footer>
+</body>
+</html>

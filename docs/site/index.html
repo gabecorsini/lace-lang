@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lace 🧵 — A programming language for agents and the humans who supervise them.</title>
+  <meta name="description" content="Lace is a statically-typed scripting language where tool and fn are different things. Tools do I/O and are automatically logged, retryable, and auditable. Functions are pure." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===== TOP NAV ===== -->
+  <nav class="topnav">
+    <a class="topnav__logo" href="index.html">Lace 🧵</a>
+
+    <button class="topnav__hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+
+    <ul class="topnav__links" id="nav-links">
+      <li><a href="tutorial.html">Tutorial</a></li>
+      <li><a href="reference.html">Reference</a></li>
+      <li><a href="stdlib.html">Stdlib</a></li>
+      <li><a href="cli.html">CLI</a></li>
+      <li><a href="lsp.html">LSP</a></li>
+      <li class="github-link">
+        <a href="https://github.com/gabecorsini/lace-lang" target="_blank" rel="noopener">
+          <!-- GitHub SVG icon -->
+          <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:middle;margin-right:0.3em">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+              0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+              -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87
+              2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+              0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+              2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04
+              2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15
+              0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01
+              1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          GitHub
+        </a>
+      </li>
+    </ul>
+  </nav>
+
+  <!-- ===== PAGE WRAPPER (no sidebar on landing) ===== -->
+  <div class="page-wrapper">
+    <main class="main-content" style="width:100%;">
+      <div class="content-inner">
+
+        <!-- ===== HERO ===== -->
+        <section class="hero">
+          <h1>Lace 🧵</h1>
+          <p class="hero__tagline">A programming language for agents and the humans who supervise them.</p>
+
+          <p class="hero__pitch">
+            Lace is a statically-typed scripting language where <code>tool</code> and <code>fn</code> are
+            different things. Tools do I/O and are automatically logged, retryable, and auditable.
+            Functions are pure. The runtime enforces the difference.
+          </p>
+        </section>
+
+        <!-- ===== CODE EXAMPLE ===== -->
+        <pre><code><span class="dec">@retry</span><span class="pun">(</span><span class="var">max</span><span class="pun">:</span> <span class="num">3</span><span class="pun">)</span>
+<span class="kw">tool</span> <span class="fn">fetch_user</span><span class="pun">(</span><span class="var">id</span><span class="pun">:</span> <span class="typ">Int</span><span class="pun">)</span> <span class="pun">-&gt;</span> <span class="typ">Result</span><span class="pun">&lt;</span><span class="typ">String</span><span class="pun">,</span> <span class="typ">String</span><span class="pun">&gt;</span> <span class="pun">{</span>
+    <span class="kw">let</span> <span class="var">response</span> <span class="op">=</span> <span class="typ">Http</span><span class="pun">.</span><span class="fn">get</span><span class="pun">(</span><span class="str">"https://api.example.com/users/"</span> <span class="op">++</span> <span class="var">id</span><span class="pun">.</span><span class="fn">to_string</span><span class="pun">())</span><span class="op">?</span>
+    <span class="kw">let</span> <span class="var">data</span> <span class="op">=</span> <span class="typ">Json</span><span class="pun">.</span><span class="fn">parse</span><span class="pun">(</span><span class="var">response</span><span class="pun">)</span><span class="op">?</span>
+    <span class="typ">Json</span><span class="pun">.</span><span class="fn">get</span><span class="pun">(</span><span class="var">data</span><span class="pun">,</span> <span class="str">"name"</span><span class="pun">)</span> <span class="op">|&gt;</span> <span class="typ">Option</span><span class="pun">.</span><span class="fn">unwrap_or</span><span class="pun">(</span><span class="str">"unknown"</span><span class="pun">)</span> <span class="op">|&gt;</span> <span class="fn">Ok</span>
+<span class="pun">}</span>
+
+<span class="kw">fn</span> <span class="fn">greet</span><span class="pun">(</span><span class="var">name</span><span class="pun">:</span> <span class="typ">String</span><span class="pun">)</span> <span class="pun">-&gt;</span> <span class="typ">String</span> <span class="pun">{</span>
+    <span class="str">"Hello, "</span> <span class="op">++</span> <span class="var">name</span> <span class="op">++</span> <span class="str">"!"</span>
+<span class="pun">}</span></code></pre>
+
+        <!-- ===== FEATURE CARDS ===== -->
+        <div class="features">
+          <div class="card">
+            <span class="card__icon">🔒</span>
+            <div class="card__title">Effect-safe</div>
+            <p class="card__body">
+              <code>fn</code> is pure. <code>tool</code> does I/O. The type checker enforces the
+              difference and warns when you mix them.
+            </p>
+          </div>
+
+          <div class="card">
+            <span class="card__icon">📋</span>
+            <div class="card__title">Auto-instrumented</div>
+            <p class="card__body">
+              Every tool call emits structured JSON logs automatically. No print-debugging.
+              No manual tracing.
+            </p>
+          </div>
+
+          <div class="card">
+            <span class="card__icon">🥧</span>
+            <div class="card__title">Pi-portable</div>
+            <p class="card__body">
+              Lean interpreter, bytecode VM, single-binary bundling. Runs on ARM. No GC pauses.
+            </p>
+          </div>
+        </div>
+
+        <!-- ===== CTAs ===== -->
+        <div class="hero__ctas">
+          <a class="btn btn-primary" href="tutorial.html">Read the Tutorial</a>
+          <a class="btn btn-secondary" href="https://github.com/gabecorsini/lace-lang" target="_blank" rel="noopener">View on GitHub</a>
+        </div>
+
+      </div><!-- /content-inner -->
+    </main>
+  </div><!-- /page-wrapper -->
+
+  <!-- ===== FOOTER ===== -->
+  <footer>
+    <span>Apache-2.0</span>
+    <span class="sep">·</span>
+    <span>Built by Hermes</span>
+    <span class="sep">·</span>
+    <a href="https://github.com/gabecorsini/lace-lang" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+
+  <!-- ===== JS: hamburger + sidebar toggle ===== -->
+  <script>
+    (function () {
+      const hamburger = document.getElementById('hamburger');
+      const navLinks  = document.getElementById('nav-links');
+
+      hamburger.addEventListener('click', function () {
+        const open = navLinks.classList.toggle('open');
+        hamburger.classList.toggle('open', open);
+        hamburger.setAttribute('aria-expanded', String(open));
+      });
+
+      // Close nav on link click (mobile)
+      navLinks.querySelectorAll('a').forEach(function (link) {
+        link.addEventListener('click', function () {
+          navLinks.classList.remove('open');
+          hamburger.classList.remove('open');
+          hamburger.setAttribute('aria-expanded', 'false');
+        });
+      });
+
+      // Heading anchor injection
+      document.querySelectorAll('h1[id], h2[id], h3[id], h4[id]').forEach(function (heading) {
+        const anchor = document.createElement('a');
+        anchor.className = 'heading-anchor';
+        anchor.href = '#' + heading.id;
+        anchor.textContent = '#';
+        anchor.setAttribute('aria-hidden', 'true');
+        heading.appendChild(anchor);
+      });
+    })();
+  </script>
+
+</body>
+</html>
