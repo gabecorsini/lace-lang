@@ -1,67 +1,49 @@
-# Lace
+# Lace 🧵
 
-A programming language designed for agentic execution.
+> A programming language I don't fully understand, built by an AI I asked nicely.
 
-Lace is built for a world where software agents call tools, mutate state, and fail in predictable ways. Instead of hiding those failures, Lace makes them explicit: effects are typed, uncertainty is represented in the type system, and side effects can be replayed deterministically.
+---
 
-## Why Lace exists
+I saw [Vercel ship Zero](https://github.com/vercel-labs/zerolang) — a programming language built by one of the best engineering teams in the world.
 
-Agent systems usually break in familiar ways:
-- silent tool failures and retries without traceability
-- hidden side effects and non-deterministic runs
-- ambiguous outputs that downstream code treats as certain
-- context blowouts that degrade quality over time
+I am not that. I'm an identity security consultant who thinks about Entra ID all day. I don't know how compilers work. I've never written a lexer. I have no business making a programming language.
 
-Lace is designed so these problems are loud and inspectable.
+So naturally, I made one anyway. I just asked my AI agent (Hermes) to do it while I made coffee.
 
-## Current highlights
+This is Lace.
 
-- First-class tool declarations with typed signatures
-- Effect-annotated functions (`[Pure]`, `[IO]`, `[ToolCall]`, ...)
-- Explicit uncertainty types (`Confident<T>`, `Uncertain<T>`)
-- Pipeline syntax (`|>`) for composable data flow
-- Checkpoint + replay runtime support for deterministic recovery
+---
+
+## What even is this?
+
+Lace is a statically-typed, effect-annotated programming language designed for agentic workloads. It has:
+
+- First-class `tool` declarations with typed signatures
+- Effect types (`[Pure]`, `[IO]`, `[ToolCall]`) so agents know what they're calling
+- Explicit uncertainty (`Confident<T>`, `Uncertain<T>`) — no pretending
+- Pipeline syntax (`|>`) because it looks cool
+- Checkpoint + replay for deterministic recovery
+- A test runner (`lace test`)
+- A module system
+- `for` and `while` loops
+
+I didn't write any of this. Hermes did. Over several sessions. Using GitHub Copilot (claude-sonnet-4.6), because I switched from Claude Code after it hit a rate limit and annoyed me.
+
+---
 
 ## Quick start
 
-Requirements:
-- Rust stable toolchain
-
-Build the workspace:
+You'll need Rust.
 
 ```bash
 cargo build --workspace
-```
-
-Run CLI help:
-
-```bash
-./target/debug/lace --help
-```
-
-Check and run an example:
-
-```bash
-./target/debug/lace check examples/hello.lace
 ./target/debug/lace run examples/hello.lace
+./target/debug/lace test examples/tests.lace
 ```
 
-## Language snippets
+---
 
-### 1) Pipeline composition
-
-```lace
-fn filter_even(values: List<Int>) -> List<Int> [Pure] { values }
-fn scale(values: List<Int>) -> List<Int> [Pure] { values }
-
-fn main() -> List<Int> [Pure] {
-  [1, 2, 3, 4, 5]
-    |> filter_even()
-    |> scale()
-}
-```
-
-### 2) Effect-typed entrypoint with tool call
+## Example
 
 ```lace
 @shell("echo '{\"ok\":true}'")
@@ -73,44 +55,36 @@ fn main() -> Result<Dynamic, String> [ToolCall, IO] {
 }
 ```
 
-### 3) Explicit uncertainty
+---
 
-```lace
-tool classify(prompt: String) -> Uncertain<List<String>>
+## Roadmap
 
-fn main() -> Unit [ToolCall, IO] {
-  let result = classify("design a robust coding agent")
-  match result {
-    Uncertain(_candidates) => println("model returned multiple plausible answers"),
-  }
-}
-```
+- [x] Lexer, parser, AST
+- [x] Type checker + effect system
+- [x] Interpreter runtime
+- [x] Tool execution (`@shell`, `@http`)
+- [x] Checkpoint + replay
+- [x] Module system
+- [x] `for`/`while` loops + List stdlib
+- [x] Test framework (`lace test`, `assert`, `assert_eq`, `assert_err`)
+- [ ] String stdlib
+- [ ] `?` error propagation
+- [ ] User-defined record types
+- [ ] File I/O stdlib
+- [ ] LSP + VS Code extension (lol maybe)
 
-## Project roadmap
+---
 
-Completed:
-- Phase 1: core parser/type/effect/interpreter skeleton
-- Phase 2: typed values and effect validation expansion
-- Phase 3: tool-call surface + replay/checkpoint foundations
-- Phase 4: polished CLI (`run/check/repl/version`), public docs, and curated examples
+## Why "Lace"?
 
-Next:
-- stronger pattern-matching/runtime coverage
-- richer stdlib surface and collection transforms
-- package/module boundaries and import system
-- expanded test matrix and conformance suites
+**L**ogic + **A**ction + **C**omposition **E**ngine.
 
-## Repository layout
+Hermes named it. I thought it sounded cool. We kept it.
 
-- `crates/lace-ast`: AST definitions shared across compiler/runtime stages
-- `crates/lace-lexer`: tokenization
-- `crates/lace-parser`: parser + parse diagnostics
-- `crates/lace-types`: static type checker
-- `crates/lace-effects`: effect checker and effect diagnostics
-- `crates/lace-interp`: interpreter runtime with tool execution + replay hooks
-- `crates/lace-stdlib`: standard library surface/types
-- `crates/lace-cli`: command-line interface (`lace` binary)
+---
 
 ## License
 
 Apache-2.0
+
+Built by [Hermes](https://hermes-agent.nousresearch.com). Owned by someone who just watched it happen.
