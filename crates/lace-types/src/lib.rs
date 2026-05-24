@@ -150,6 +150,15 @@ impl Checker {
                 Type::List(Box::new(Type::Dynamic)),
             ),
         );
+        // Result / Option variant constructors
+        self.fn_sigs
+            .insert("Ok".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs
+            .insert("Err".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs
+            .insert("Some".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs
+            .insert("None".into(), (vec![], Type::Dynamic));
     }
 
     fn collect_signatures(&mut self, program: &Program) {
@@ -539,6 +548,7 @@ impl Checker {
                     | BinaryOp::Sub
                     | BinaryOp::Mul
                     | BinaryOp::Div
+                    | BinaryOp::IntDiv
                     | BinaryOp::Rem => {
                         if lt == Type::Float || rt == Type::Float {
                             Type::Float
@@ -694,6 +704,12 @@ impl Checker {
                     self.bind_pattern(&elems[0], inner);
                 }
                 ("None", Type::Option(_)) if elems.is_empty() => {}
+                // Allow any constructor pattern on Dynamic/Unknown types
+                (_, Type::Dynamic) | (_, Type::Unknown) => {
+                    for elem in elems {
+                        self.bind_pattern(elem, &Type::Dynamic);
+                    }
+                }
                 _ => self.errors.push(TypeError::InvalidPattern {
                     message: format!(
                         "constructor pattern '{}' does not match scrutinee type {:?}",
@@ -749,7 +765,13 @@ impl Checker {
                 params.iter().map(|p| self.resolve_type_expr(p)).collect(),
                 Box::new(self.resolve_type_expr(ret)),
             ),
-            TypeExpr::Named { name, .. } => Type::Named(name.clone(), Vec::new()),
+            TypeExpr::Named { name, .. } => {
+                if name == "Dynamic" {
+                    Type::Dynamic
+                } else {
+                    Type::Named(name.clone(), Vec::new())
+                }
+            }
             TypeExpr::Generic { name, args, .. } => {
                 let lowered = args
                     .iter()

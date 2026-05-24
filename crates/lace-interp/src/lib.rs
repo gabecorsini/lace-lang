@@ -29,10 +29,13 @@ pub enum Value {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RuntimeError {
     pub message: String,
     pub span: Option<Span>,
+    /// When Some, this error was produced by the `?` operator propagating an Err value.
+    /// call_function catches this and returns Ok(Err(v)) instead of propagating the error.
+    pub propagated_err: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +362,7 @@ impl Interpreter {
                 module_path.display()
             ),
             span: Some(import.span),
+            propagated_err: None,
         })?;
 
         let (parsed, parse_errors) = lace_parser::parse_program(&source);
@@ -374,12 +378,14 @@ impl Interpreter {
                     module_name, joined
                 ),
                 span: Some(import.span),
+                propagated_err: None,
             });
         }
 
         let program = parsed.ok_or_else(|| RuntimeError {
             message: format!("failed to parse imported module '{}'", module_name),
             span: Some(import.span),
+            propagated_err: None,
         })?;
 
         if self.loaded_modules.contains(&module_name) {
@@ -440,6 +446,7 @@ impl Interpreter {
                     return Err(RuntimeError {
                         message: format!("unknown variable '{}'", s.name),
                         span: Some(s.span),
+                        propagated_err: None,
                     });
                 }
                 Ok(EvalFlow::Value(Value::Unit))
@@ -465,6 +472,7 @@ impl Interpreter {
                     Err(RuntimeError {
                         message: "for-loop requires a list iterator".into(),
                         span: Some(f.span),
+                        propagated_err: None,
                     })
                 }
             }
@@ -517,6 +525,7 @@ impl Interpreter {
                     Err(RuntimeError {
                         message: format!("unknown identifier '{}'", name),
                         span: Some(*span),
+                        propagated_err: None,
                     })
                 }
             }
@@ -559,6 +568,7 @@ impl Interpreter {
                 Err(RuntimeError {
                     message: "non-exhaustive match at runtime".into(),
                     span: Some(m.span),
+                    propagated_err: None,
                 })
             }
             Expr::FnCall(call) => {
@@ -577,6 +587,7 @@ impl Interpreter {
                             .ok_or_else(|| RuntimeError {
                                 message: format!("unknown function '{}'", call.name),
                                 span: Some(call.span),
+                                propagated_err: None,
                             });
                     }
                 }
@@ -603,6 +614,7 @@ impl Interpreter {
                         fields.get(field).cloned().ok_or_else(|| RuntimeError {
                             message: format!("missing field '{}'", field),
                             span: Some(*span),
+                            propagated_err: None,
                         })
                     }
                     Value::String(module_name) => {
@@ -616,12 +628,14 @@ impl Interpreter {
                                     module_name, field
                                 ),
                                 span: Some(*span),
+                                propagated_err: None,
                             })
                         }
                     }
                     _ => Err(RuntimeError {
                         message: "field access on non-record value".into(),
                         span: Some(*span),
+                        propagated_err: None,
                     }),
                 }
             }
@@ -639,6 +653,7 @@ impl Interpreter {
                         .ok_or_else(|| RuntimeError {
                             message: format!("list index {} out of bounds", idx),
                             span: Some(*span),
+                            propagated_err: None,
                         }),
                     (Value::Tuple(items), Value::Int(idx)) => items
                         .get(idx as usize)
@@ -646,10 +661,12 @@ impl Interpreter {
                         .ok_or_else(|| RuntimeError {
                             message: format!("tuple index {} out of bounds", idx),
                             span: Some(*span),
+                            propagated_err: None,
                         }),
                     _ => Err(RuntimeError {
                         message: "indexing requires list/tuple and int index".into(),
                         span: Some(*span),
+                        propagated_err: None,
                     }),
                 }
             }
@@ -680,6 +697,7 @@ impl Interpreter {
                     _ => Err(RuntimeError {
                         message: "pipeline RHS must be callable".into(),
                         span: Some(*span),
+                        propagated_err: None,
                     }),
                 }
             }
@@ -702,6 +720,7 @@ impl Interpreter {
                         _ => Err(RuntimeError {
                             message: "unary '-' requires int or float".into(),
                             span: Some(*span),
+                            propagated_err: None,
                         }),
                     },
                     UnaryOp::Not => Ok(Value::Bool(!as_bool(&v))),
@@ -710,6 +729,7 @@ impl Interpreter {
             Expr::Closure(_) => Err(RuntimeError {
                 message: "closure runtime values are not implemented in Phase 2".into(),
                 span: Some(expr.span()),
+                propagated_err: None,
             }),
             Expr::RecordLiteral(r) => {
                 let mut fields = HashMap::new();
@@ -750,6 +770,7 @@ impl Interpreter {
                         Err(RuntimeError {
                             message: format!("error propagation: {:?}", payload[0]),
                             span: Some(*span),
+                            propagated_err: Some(payload[0].clone()),
                         })
                     }
                     other => Ok(other),
@@ -779,6 +800,7 @@ impl Interpreter {
             .ok_or_else(|| RuntimeError {
                 message: format!("unknown function '{}'", name),
                 span: Some(span),
+                propagated_err: None,
             })?;
 
         let f = self
@@ -788,6 +810,7 @@ impl Interpreter {
             .ok_or_else(|| RuntimeError {
                 message: format!("unknown function '{}'", name),
                 span: Some(span),
+                propagated_err: None,
             })?;
 
         if f.params.len() != args.len() {
@@ -799,6 +822,7 @@ impl Interpreter {
                     args.len()
                 ),
                 span: Some(span),
+                propagated_err: None,
             });
         }
 
@@ -813,6 +837,17 @@ impl Interpreter {
         let eval_result = self.eval_block(&f.body);
         self.env.pop();
         self.call_stack.pop();
+
+        // If a `?` propagated an Err value, catch it here and return Ok(Err(v))
+        let eval_result = match eval_result {
+            Err(RuntimeError { propagated_err: Some(err_val), .. }) => {
+                return Ok(Value::Variant {
+                    name: "Err".into(),
+                    payload: vec![err_val],
+                });
+            }
+            other => other,
+        };
 
         let out = match eval_result? {
             EvalFlow::Value(v) => v,
@@ -903,14 +938,17 @@ impl Interpreter {
                 (Some(Value::Bool(false)), Some(Value::String(message))) => Err(RuntimeError {
                     message: format!("assertion failed: {message}"),
                     span: None,
+                    propagated_err: None,
                 }),
                 (Some(Value::Bool(false)), _) => Err(RuntimeError {
                     message: "assertion failed".into(),
                     span: None,
+                    propagated_err: None,
                 }),
                 _ => Err(RuntimeError {
                     message: "assert expects (Bool, String)".into(),
                     span: None,
+                    propagated_err: None,
                 }),
             },
             "assert_eq" => {
@@ -918,12 +956,14 @@ impl Interpreter {
                     return Err(RuntimeError {
                         message: "assert_eq expects (actual, expected, message)".into(),
                         span: None,
+                        propagated_err: None,
                     });
                 };
                 let Some(expected) = args.get(1) else {
                     return Err(RuntimeError {
                         message: "assert_eq expects (actual, expected, message)".into(),
                         span: None,
+                        propagated_err: None,
                     });
                 };
                 let message = match args.get(2) {
@@ -932,6 +972,7 @@ impl Interpreter {
                         return Err(RuntimeError {
                             message: "assert_eq expects third argument to be String".into(),
                             span: None,
+                            propagated_err: None,
                         });
                     }
                     None => None,
@@ -951,6 +992,7 @@ impl Interpreter {
                     Err(RuntimeError {
                         message: msg,
                         span: None,
+                        propagated_err: None,
                     })
                 }
             }
@@ -959,6 +1001,7 @@ impl Interpreter {
                     return Err(RuntimeError {
                         message: "assert_err expects (result, message)".into(),
                         span: None,
+                        propagated_err: None,
                     });
                 };
                 let message = match args.get(1) {
@@ -967,6 +1010,7 @@ impl Interpreter {
                         return Err(RuntimeError {
                             message: "assert_err expects second argument to be String".into(),
                             span: None,
+                            propagated_err: None,
                         });
                     }
                     None => None,
@@ -982,6 +1026,7 @@ impl Interpreter {
                         Err(RuntimeError {
                             message: msg,
                             span: None,
+                            propagated_err: None,
                         })
                     }
                 }
@@ -991,6 +1036,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "List.length expects a list".into(),
                     span: None,
+                    propagated_err: None,
                 }),
             },
             "List.range" => match (args.first(), args.get(1)) {
@@ -1006,6 +1052,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "List.range expects (Int, Int)".into(),
                     span: None,
+                    propagated_err: None,
                 }),
             },
             "List.map" => match (args.first(), args.get(1)) {
@@ -1021,6 +1068,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "List.map expects (List, fn_ref)".into(),
                     span: None,
+                    propagated_err: None,
                 }),
             },
             "List.filter" => match (args.first(), args.get(1)) {
@@ -1038,8 +1086,23 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "List.filter expects (List, fn_ref)".into(),
                     span: None,
+                    propagated_err: None,
                 }),
             },
+            // Result / Option variant constructors
+            "Ok" => {
+                let v = args.first().cloned().unwrap_or(Value::Unit);
+                Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![v] }))
+            }
+            "Err" => {
+                let v = args.first().cloned().unwrap_or(Value::Unit);
+                Ok(Some(Value::Variant { name: "Err".into(), payload: vec![v] }))
+            }
+            "Some" => {
+                let v = args.first().cloned().unwrap_or(Value::Unit);
+                Ok(Some(Value::Variant { name: "Some".into(), payload: vec![v] }))
+            }
+            "None" => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
             _ => Ok(None),
         }
     }
@@ -1074,6 +1137,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "unwrap_or expects Option value".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "map" => match target {
@@ -1105,6 +1169,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "map expects Option/Result/List value".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "and_then" => match target {
@@ -1135,6 +1200,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "and_then expects Option or Result".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "unwrap_or_else" => match target {
@@ -1151,15 +1217,24 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "unwrap_or_else expects Result".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
 
             // String helpers
-            "trim" => match target {
-                Value::String(s) => Ok(Value::String(s.trim().to_string())),
+            "len" => match target {
+                Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                _ => Err(RuntimeError {
+                    message: "len expects String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "trim" => match target {                Value::String(s) => Ok(Value::String(s.trim().to_string())),
                 _ => Err(RuntimeError {
                     message: "trim expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "split" => match target {
@@ -1174,6 +1249,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "split expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "contains" => match target {
@@ -1184,6 +1260,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "contains expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "starts_with" => match target {
@@ -1194,6 +1271,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "starts_with expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "ends_with" => match target {
@@ -1204,6 +1282,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "ends_with expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "to_upper" => match target {
@@ -1211,6 +1290,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "to_upper expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "to_lower" => match target {
@@ -1218,6 +1298,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "to_lower expects String".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
 
@@ -1227,6 +1308,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "filter expects List".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "fold" => match target {
@@ -1234,6 +1316,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "fold expects List".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "collect" => match target {
@@ -1241,6 +1324,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "collect expects List".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "zip" => match (target, args.first().cloned()) {
@@ -1255,6 +1339,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "zip expects two lists".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "enumerate" => match target {
@@ -1269,6 +1354,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "enumerate expects List".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
 
@@ -1280,6 +1366,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "unwrap expects Confident(value)".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "candidates" => match target {
@@ -1289,6 +1376,7 @@ impl Interpreter {
                 _ => Err(RuntimeError {
                     message: "candidates expects Uncertain(list)".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             "top" => match target {
@@ -1309,17 +1397,20 @@ impl Interpreter {
                         Err(RuntimeError {
                             message: "Uncertain payload must be list".into(),
                             span: Some(span),
+                            propagated_err: None,
                         })
                     }
                 }
                 _ => Err(RuntimeError {
                     message: "top expects Uncertain(list)".into(),
                     span: Some(span),
+                    propagated_err: None,
                 }),
             },
             _ => Err(RuntimeError {
                 message: format!("unsupported method '{}'", method),
                 span: Some(span),
+                propagated_err: None,
             }),
         }
     }
@@ -1334,6 +1425,7 @@ impl Interpreter {
             return Err(RuntimeError {
                 message: format!("unknown tool '{}'", tool_name),
                 span: Some(span),
+                propagated_err: None,
             });
         };
 
@@ -1524,6 +1616,7 @@ impl Interpreter {
                     return Err(RuntimeError {
                         message: format!("unsupported @http method '{}'", method),
                         span: Some(span),
+                        propagated_err: None,
                     })
                 }
             };
@@ -1660,11 +1753,13 @@ impl Interpreter {
         let state_text = serde_json::to_string_pretty(&state).map_err(|e| RuntimeError {
             message: format!("failed to serialize checkpoint state: {e}"),
             span: None,
+            propagated_err: None,
         })?;
 
         fs::write(checkpoint_path, state_text).map_err(|e| RuntimeError {
             message: format!("failed to write checkpoint file '{}': {e}", checkpoint_path),
             span: None,
+            propagated_err: None,
         })
     }
 
@@ -1730,6 +1825,7 @@ impl Interpreter {
         let line = serde_json::to_string(&entry).map_err(|e| RuntimeError {
             message: format!("failed to serialize journal entry: {e}"),
             span: None,
+            propagated_err: None,
         })?;
 
         let mut file = OpenOptions::new()
@@ -1739,11 +1835,13 @@ impl Interpreter {
             .map_err(|e| RuntimeError {
                 message: format!("failed to open journal file '{}': {e}", self.journal_path),
                 span: None,
+                propagated_err: None,
             })?;
 
         writeln!(file, "{line}").map_err(|e| RuntimeError {
             message: format!("failed to write journal entry: {e}"),
             span: None,
+            propagated_err: None,
         })
     }
 
@@ -1782,6 +1880,10 @@ impl Interpreter {
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 / b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a / b as f64)),
                 _ => type_error(span, "'/' expects numeric operands"),
+            },
+            BinaryOp::IntDiv => match (left, right) {
+                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.div_euclid(b))),
+                _ => type_error(span, "'//' expects integer operands"),
             },
             BinaryOp::Rem => match (left, right) {
                 (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
@@ -1903,6 +2005,7 @@ fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
     let content = fs::read_to_string(path).map_err(|e| RuntimeError {
         message: format!("failed to read replay source '{}': {e}", path),
         span: None,
+        propagated_err: None,
     })?;
 
     // If the path points to a checkpoint state JSON, follow its journal_path.
@@ -1914,6 +2017,7 @@ fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
                     state.journal_path
                 ),
                 span: None,
+                propagated_err: None,
             })?;
         let mut entries = Vec::new();
         for line in journal_content.lines() {
@@ -2124,6 +2228,7 @@ fn type_error<T>(span: Span, msg: &str) -> Result<T, RuntimeError> {
     Err(RuntimeError {
         message: msg.to_string(),
         span: Some(span),
+        propagated_err: None,
     })
 }
 

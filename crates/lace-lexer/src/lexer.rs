@@ -52,7 +52,7 @@ impl<'a> Lexer<'a> {
                 self.bump();
                 continue;
             }
-            if ch == '/' && self.peek2() == Some('/') {
+            if ch == '#' {
                 self.skip_line_comment();
                 continue;
             }
@@ -93,7 +93,12 @@ impl<'a> Lexer<'a> {
                 }
                 '/' => {
                     self.bump();
-                    self.push(TokenKind::Slash, start);
+                    if self.peek() == Some('/') {
+                        self.bump();
+                        self.push(TokenKind::SlashSlash, start);
+                    } else {
+                        self.push(TokenKind::Slash, start);
+                    }
                 }
                 '%' => {
                     self.bump();

@@ -1079,6 +1079,7 @@ impl Parser {
             let (l_bp, r_bp, bop, is_pipe) = match op {
                 TokenKind::Star => (17, 18, Some(BinaryOp::Mul), false),
                 TokenKind::Slash => (17, 18, Some(BinaryOp::Div), false),
+                TokenKind::SlashSlash => (17, 18, Some(BinaryOp::IntDiv), false),
                 TokenKind::Percent => (17, 18, Some(BinaryOp::Rem), false),
                 TokenKind::Plus => (15, 16, Some(BinaryOp::Add), false),
                 TokenKind::Minus => (15, 16, Some(BinaryOp::Sub), false),
