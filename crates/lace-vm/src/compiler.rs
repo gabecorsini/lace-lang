@@ -156,7 +156,7 @@ impl Compiler {
             }
 
             Expr::FnCall(call) => {
-                if call.name == "print" {
+                if call.name == "print" || call.name == "println" {
                     // compile first arg (or Unit)
                     if let Some(arg) = call.args.first() {
                         self.compile_expr(arg, chunk)?;
@@ -165,6 +165,12 @@ impl Compiler {
                         chunk.emit(OpCode::LoadConst(idx));
                     }
                     chunk.emit(OpCode::Print);
+                } else if is_free_builtin(&call.name) {
+                    let n = call.args.len();
+                    for arg in &call.args {
+                        self.compile_expr(arg, chunk)?;
+                    }
+                    chunk.emit(OpCode::CallBuiltin(call.name.clone(), n));
                 } else {
                     let n = call.args.len();
                     for arg in &call.args {
@@ -202,12 +208,33 @@ impl Compiler {
                 chunk.emit(OpCode::GetField(field.clone()));
             }
 
+            Expr::MethodCall(call) => {
+                // Check if target is a module identifier (List, Json, etc.)
+                if let Expr::Ident(module_name, _) = call.target.as_ref() {
+                    if is_stdlib_module(module_name) {
+                        // e.g. List.range(0, 5) — compile as CallBuiltin("List.range", n)
+                        let qualified = format!("{}.{}", module_name, call.method);
+                        let n = call.args.len();
+                        for arg in &call.args {
+                            self.compile_expr(arg, chunk)?;
+                        }
+                        chunk.emit(OpCode::CallBuiltin(qualified, n));
+                        return Ok(());
+                    }
+                }
+                // Otherwise: value.method(args) — compile as CallMethod
+                let n = call.args.len();
+                for arg in &call.args {
+                    self.compile_expr(arg, chunk)?;
+                }
+                self.compile_expr(&call.target, chunk)?;
+                chunk.emit(OpCode::CallMethod(call.method.clone(), n));
+            }
             // Unsupported — push Unit
             Expr::Match(_)
             | Expr::Closure(_)
             | Expr::RecordLiteral(_)
             | Expr::TupleLiteral { .. }
-            | Expr::MethodCall(_)
             | Expr::Pipeline { .. }
             | Expr::Index { .. }
             | Expr::ErrorProp { .. }
@@ -339,4 +366,40 @@ pub fn compile_program(source: &str) -> Result<Vec<Chunk>, VmError> {
     let mut all_chunks = vec![bootstrap];
     all_chunks.extend(fn_chunks);
     Ok(all_chunks)
+}
+
+/// Returns true if `name` is a known free stdlib builtin (not a module-qualified call).
+fn is_free_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "to_string"
+            | "len"
+            | "type_of"
+            | "assert"
+            | "assert_eq"
+            | "assert_err"
+            | "now_unix"
+            | "now_millis"
+            | "int_to_float"
+            | "float_to_int"
+            | "parse_int"
+            | "parse_float"
+    )
+}
+
+/// Returns true if `name` is a known stdlib module name.
+fn is_stdlib_module(name: &str) -> bool {
+    matches!(
+        name,
+        "List"
+            | "Json"
+            | "Http"
+            | "File"
+            | "Env"
+            | "Math"
+            | "String"
+            | "Map"
+            | "Os"
+            | "Process"
+    )
 }

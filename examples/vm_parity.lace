@@ -1,0 +1,53 @@
+fn double(x: Int) -> Int [Pure] { x * 2 }
+fn is_even(x: Int) -> Bool [Pure] { x % 2 == 0 }
+
+fn main() -> Unit [IO] {
+    # to_string free function
+    let s = to_string(42)
+    println(s)
+
+    # to_string dot-method
+    let s2 = 99.to_string()
+    println(s2)
+
+    # List.range
+    let r = List.range(0, 5)
+    println(List.length(r))
+
+    # List.map
+    let doubled = List.map(r, double)
+    println(doubled)
+
+    # List.filter
+    let evens = List.filter(r, is_even)
+    println(evens)
+
+    # List.sum
+    let total = List.sum(r)
+    println(total)
+
+    # String dot-methods: trim
+    let padded = "  hello  "
+    let trimmed = padded.trim()
+    println(trimmed)
+
+    # String dot-method: len
+    let slen = "hello".len()
+    println(slen)
+
+    # Json.parse and Json.get
+    let json_str = "{\"name\": \"Alice\", \"age\": 30}"
+    let parsed = Json.parse(json_str)
+    let obj = parsed.unwrap()
+    let name_opt = Json.get(obj, "name")
+    let name = name_opt.unwrap()
+    println(name)
+
+    # Json.index
+    let arr_str = "[10, 20, 30]"
+    let arr = Json.parse(arr_str).unwrap()
+    let elem = Json.index(arr, 1).unwrap()
+    println(elem)
+
+    println("done")
+}

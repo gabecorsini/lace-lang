@@ -30,6 +30,10 @@ pub enum OpCode {
     JumpIfTrue(usize),
     Call(usize),
     CallTool(usize),
+    /// Call a stdlib builtin by name with N args already on the stack.
+    CallBuiltin(String, usize),
+    /// Call a method on an object: stack has [args..., target]. Pop target + args, dispatch.
+    CallMethod(String, usize),
     Return,
     MakeList(usize),
     MakeMap(usize),

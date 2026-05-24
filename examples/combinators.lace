@@ -1,0 +1,35 @@
+## combinators.lace — Option and Result combinators demo
+
+fn double(x: Int) -> Int [Pure] { x * 2 }
+fn is_positive(x: Int) -> Bool [Pure] { x > 0 }
+fn stringify_err(e: String) -> String [Pure] { "Error: " ++ e }
+
+fn main() -> Unit [IO] {
+    # Option combinators
+    let some_val = Some(21)
+    let none_val = None()
+
+    print(to_string(some_val.map(double)))        # Some(42)
+    print(to_string(none_val.map(double)))        # None
+    print(to_string(some_val.unwrap_or(0)))       # 21
+    print(to_string(none_val.unwrap_or(0)))       # 0
+    print(to_string(some_val.is_some()))          # true
+    print(to_string(none_val.is_none()))          # true
+    print(to_string(some_val.filter(is_positive))) # Some(21)
+    print(to_string(some_val.ok_or("missing")))  # Ok(21)
+    print(to_string(none_val.ok_or("missing")))  # Err(missing)
+
+    # Result combinators
+    let ok_val = Ok(21)
+    let err_val: Result<Int, String> = Err("oops")
+
+    print(to_string(ok_val.map(double)))            # Ok(42)
+    print(to_string(err_val.map(double)))           # Err(oops)
+    print(to_string(err_val.map_err(stringify_err))) # Err(Error: oops)
+    print(to_string(ok_val.is_ok()))                # true
+    print(to_string(err_val.is_err()))              # true
+    print(to_string(ok_val.unwrap_or(0)))           # 21
+    print(to_string(err_val.unwrap_or(0)))          # 0
+    print(to_string(ok_val.ok()))                   # Some(21)
+    print(to_string(err_val.err()))                 # Some(oops)
+}

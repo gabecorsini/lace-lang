@@ -1892,8 +1892,14 @@ impl Interpreter {
                 Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
                     Ok(args.first().cloned().unwrap_or(Value::Unit))
                 }
+                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                Value::Variant { name, .. } if name == "Err" => {
+                    Ok(args.first().cloned().unwrap_or(Value::Unit))
+                }
                 _ => Err(RuntimeError {
-                    message: "unwrap_or expects Option value".into(),
+                    message: "unwrap_or expects Option or Result value".into(),
                     span: Some(span),
                     propagated_err: None,
                 }),
@@ -1991,6 +1997,16 @@ impl Interpreter {
                 }
             }
             "unwrap_or_else" => match target {
+                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
+                }
+                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                    if let Some(callable) = args.first().cloned() {
+                        self.call_callable(callable, vec![], span)
+                    } else {
+                        Ok(Value::Unit)
+                    }
+                }
                 Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
                     Ok(payload[0].clone())
                 }
@@ -2002,11 +2018,109 @@ impl Interpreter {
                     }
                 }
                 _ => Err(RuntimeError {
-                    message: "unwrap_or_else expects Result".into(),
+                    message: "unwrap_or_else expects Option or Result".into(),
                     span: Some(span),
                     propagated_err: None,
                 }),
             },
+            "filter" if matches!(&target, Value::Variant { .. }) => {
+                let callable = args.first().cloned();
+                match target {
+                    Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            let keep = self.call_callable(f, vec![payload[0].clone()], span)?;
+                            if as_bool(&keep) {
+                                Ok(Value::Variant { name: "Some".into(), payload })
+                            } else {
+                                Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                            }
+                        } else {
+                            Ok(Value::Variant { name: "Some".into(), payload })
+                        }
+                    }
+                    Value::Variant { name, payload: _ } if name == "None" => {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    }
+                    _ => Err(RuntimeError {
+                        message: "filter on Option expects Some or None".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
+            "ok_or" => match target {
+                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                    Ok(Value::Variant { name: "Ok".into(), payload })
+                }
+                Value::Variant { name, .. } if name == "None" => {
+                    let err = args.first().cloned().unwrap_or(Value::Unit);
+                    Ok(Value::Variant { name: "Err".into(), payload: vec![err] })
+                }
+                _ => Err(RuntimeError {
+                    message: "ok_or expects Option value".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "map_err" => {
+                let callable = args.first().cloned();
+                match target {
+                    Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                        Ok(Value::Variant { name: "Ok".into(), payload })
+                    }
+                    Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            let mapped = self.call_callable(f, vec![payload[0].clone()], span)?;
+                            Ok(Value::Variant { name: "Err".into(), payload: vec![mapped] })
+                        } else {
+                            Ok(Value::Variant { name: "Err".into(), payload })
+                        }
+                    }
+                    _ => Err(RuntimeError {
+                        message: "map_err expects Result value".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
+            "is_ok" => match target {
+                Value::Variant { ref name, .. } => Ok(Value::Bool(name == "Ok")),
+                _ => Ok(Value::Bool(false)),
+            },
+            "is_err" => match target {
+                Value::Variant { ref name, .. } => Ok(Value::Bool(name == "Err")),
+                _ => Ok(Value::Bool(false)),
+            },
+            "ok" if matches!(&target, Value::Variant { name, .. } if name == "Ok" || name == "Err") => {
+                match target {
+                    Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                        Ok(Value::Variant { name: "Some".into(), payload })
+                    }
+                    Value::Variant { name, .. } if name == "Err" => {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    }
+                    _ => Err(RuntimeError {
+                        message: "ok() expects Result value".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
+            "err" if matches!(&target, Value::Variant { name, .. } if name == "Ok" || name == "Err") => {
+                match target {
+                    Value::Variant { name, .. } if name == "Ok" => {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    }
+                    Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                        Ok(Value::Variant { name: "Some".into(), payload })
+                    }
+                    _ => Err(RuntimeError {
+                        message: "err() expects Result value".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
 
             // String helpers
             "len" => match target {

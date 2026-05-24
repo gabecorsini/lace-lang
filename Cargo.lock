@@ -644,6 +644,7 @@ dependencies = [
  "lace-interp",
  "lace-parser",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
