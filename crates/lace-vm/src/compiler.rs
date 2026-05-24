@@ -82,7 +82,13 @@ impl Compiler {
                 self.compile_expr(expr, chunk)?;
                 chunk.emit(OpCode::Pop);
             }
-            Stmt::For(_) | Stmt::While(_) | Stmt::PureBlock(_) => {
+            Stmt::For(for_stmt) => {
+                self.compile_for(for_stmt, chunk)?;
+            }
+            Stmt::While(while_stmt) => {
+                self.compile_while(while_stmt, chunk)?;
+            }
+            Stmt::PureBlock(_) => {
                 // Not implemented — no-op
             }
         }
@@ -148,6 +154,10 @@ impl Compiler {
                 self.compile_if(if_expr, chunk)?;
             }
 
+            Expr::Match(match_expr) => {
+                self.compile_match(match_expr, chunk)?;
+            }
+
             Expr::Block(block) => {
                 let prev_depth = self.scope_depth;
                 self.scope_depth += 1;
@@ -165,22 +175,46 @@ impl Compiler {
                         chunk.emit(OpCode::LoadConst(idx));
                     }
                     chunk.emit(OpCode::Print);
-                } else if is_free_builtin(&call.name) {
-                    let n = call.args.len();
-                    for arg in &call.args {
-                        self.compile_expr(arg, chunk)?;
-                    }
-                    chunk.emit(OpCode::CallBuiltin(call.name.clone(), n));
                 } else {
-                    let n = call.args.len();
-                    for arg in &call.args {
-                        self.compile_expr(arg, chunk)?;
-                    }
-                    chunk.emit(OpCode::LoadGlobal(call.name.clone()));
-                    if self.tool_names.contains(&call.name) {
-                        chunk.emit(OpCode::CallTool(n));
-                    } else {
-                        chunk.emit(OpCode::Call(n));
+                    match call.name.as_str() {
+                        "Some" => {
+                            let arg = call.args.first().ok_or_else(|| VmError::CompileError("Some expects 1 arg".into()))?;
+                            self.compile_expr(arg, chunk)?;
+                            chunk.emit(OpCode::MakeSome);
+                        }
+                        "Ok" => {
+                            let arg = call.args.first().ok_or_else(|| VmError::CompileError("Ok expects 1 arg".into()))?;
+                            self.compile_expr(arg, chunk)?;
+                            chunk.emit(OpCode::MakeOk);
+                        }
+                        "Err" => {
+                            let arg = call.args.first().ok_or_else(|| VmError::CompileError("Err expects 1 arg".into()))?;
+                            self.compile_expr(arg, chunk)?;
+                            chunk.emit(OpCode::MakeErr);
+                        }
+                        "None" => {
+                            let idx = chunk.add_const(Value::Variant { name: "None".into(), payload: vec![] });
+                            chunk.emit(OpCode::LoadConst(idx));
+                        }
+                        _ if is_free_builtin(&call.name) => {
+                            let n = call.args.len();
+                            for arg in &call.args {
+                                self.compile_expr(arg, chunk)?;
+                            }
+                            chunk.emit(OpCode::CallBuiltin(call.name.clone(), n));
+                        }
+                        _ => {
+                            let n = call.args.len();
+                            for arg in &call.args {
+                                self.compile_expr(arg, chunk)?;
+                            }
+                            chunk.emit(OpCode::LoadGlobal(call.name.clone()));
+                            if self.tool_names.contains(&call.name) {
+                                chunk.emit(OpCode::CallTool(n));
+                            } else {
+                                chunk.emit(OpCode::Call(n));
+                            }
+                        }
                     }
                 }
             }
@@ -231,8 +265,7 @@ impl Compiler {
                 chunk.emit(OpCode::CallMethod(call.method.clone(), n));
             }
             // Unsupported — push Unit
-            Expr::Match(_)
-            | Expr::Closure(_)
+            Expr::Closure(_)
             | Expr::RecordLiteral(_)
             | Expr::TupleLiteral { .. }
             | Expr::Pipeline { .. }
@@ -282,6 +315,198 @@ impl Compiler {
             chunk.patch_jump(jmp, end);
         }
 
+        Ok(())
+    }
+
+    fn compile_while(&mut self, while_stmt: &WhileStmt, chunk: &mut Chunk) -> Result<(), VmError> {
+        let loop_start = chunk.code.len();
+
+        self.compile_expr(&while_stmt.cond, chunk)?;
+        let jif_idx = chunk.emit_jump(OpCode::JumpIfFalse(0));
+
+        let prev_depth = self.scope_depth;
+        self.scope_depth += 1;
+        self.compile_block(&while_stmt.body, chunk)?;
+        self.scope_depth = prev_depth;
+        chunk.emit(OpCode::Pop); // discard block value
+
+        chunk.emit(OpCode::Jump(loop_start));
+
+        let after = chunk.code.len();
+        chunk.patch_jump(jif_idx, after);
+
+        let idx = chunk.add_const(Value::Unit);
+        chunk.emit(OpCode::LoadConst(idx));
+        Ok(())
+    }
+
+    fn compile_for(&mut self, for_stmt: &ForStmt, chunk: &mut Chunk) -> Result<(), VmError> {
+        // Compile iterable
+        self.compile_expr(&for_stmt.iter, chunk)?;
+
+        // Store iterable in a hidden local __iter
+        let iter_slot = self.locals.len();
+        self.locals.push("__iter__".to_string());
+        chunk.emit(OpCode::StoreLocal(iter_slot));
+
+        // __i = 0
+        let i_slot = self.locals.len();
+        self.locals.push("__i__".to_string());
+        let zero_idx = chunk.add_const(Value::Int(0));
+        chunk.emit(OpCode::LoadConst(zero_idx));
+        chunk.emit(OpCode::StoreLocal(i_slot));
+
+        // loop_start: while __i < List.length(__iter)
+        let loop_start = chunk.code.len();
+        chunk.emit(OpCode::LoadLocal(i_slot));
+        chunk.emit(OpCode::LoadLocal(iter_slot));
+        chunk.emit(OpCode::CallBuiltin("List.length".to_string(), 1));
+        chunk.emit(OpCode::Lt);
+        let jif_idx = chunk.emit_jump(OpCode::JumpIfFalse(0));
+
+        // let <var> = List.get(__iter, __i)
+        let var_slot = self.locals.len();
+        self.locals.push(for_stmt.name.clone());
+        chunk.emit(OpCode::LoadLocal(iter_slot));
+        chunk.emit(OpCode::LoadLocal(i_slot));
+        chunk.emit(OpCode::CallBuiltin("List.get".to_string(), 2));
+        chunk.emit(OpCode::StoreLocal(var_slot));
+
+        // body
+        let prev_depth = self.scope_depth;
+        self.scope_depth += 1;
+        self.compile_block(&for_stmt.body, chunk)?;
+        self.scope_depth = prev_depth;
+        chunk.emit(OpCode::Pop); // discard block value
+
+        // __i = __i + 1
+        chunk.emit(OpCode::LoadLocal(i_slot));
+        let one_idx = chunk.add_const(Value::Int(1));
+        chunk.emit(OpCode::LoadConst(one_idx));
+        chunk.emit(OpCode::Add);
+        chunk.emit(OpCode::StoreLocal(i_slot));
+
+        chunk.emit(OpCode::Jump(loop_start));
+
+        let after = chunk.code.len();
+        chunk.patch_jump(jif_idx, after);
+
+        // pop hidden locals
+        self.locals.pop(); // var
+        self.locals.pop(); // __i__
+        self.locals.pop(); // __iter__
+
+        let idx = chunk.add_const(Value::Unit);
+        chunk.emit(OpCode::LoadConst(idx));
+        Ok(())
+    }
+
+    fn compile_match(&mut self, match_expr: &MatchExpr, chunk: &mut Chunk) -> Result<(), VmError> {
+        // Compile the subject expression and store in a local slot
+        self.compile_expr(&match_expr.expr, chunk)?;
+        let subject_slot = self.locals.len();
+        self.locals.push("__match__".to_string());
+        chunk.emit(OpCode::StoreLocal(subject_slot));
+
+        let mut end_jumps: Vec<usize> = Vec::new();
+
+        for arm in &match_expr.arms {
+            match &arm.pattern {
+                Pattern::Wildcard(_) | Pattern::Ident(_, _) => {
+                    // Always matches; bind name if Ident
+                    if let Pattern::Ident(name, _) = &arm.pattern {
+                        let slot = self.locals.len();
+                        self.locals.push(name.clone());
+                        chunk.emit(OpCode::LoadLocal(subject_slot));
+                        chunk.emit(OpCode::StoreLocal(slot));
+                    }
+                    let prev_depth = self.scope_depth;
+                    self.scope_depth += 1;
+                    self.compile_expr(&arm.expr, chunk)?;
+                    self.scope_depth = prev_depth;
+                    let jmp = chunk.emit_jump(OpCode::Jump(0));
+                    end_jumps.push(jmp);
+                    // Clean up binding if added
+                    if let Pattern::Ident(_, _) = &arm.pattern {
+                        self.locals.pop();
+                    }
+                    break; // wildcard always matches, no further arms
+                }
+                Pattern::Literal(lit, _) => {
+                    // Dup subject and compare
+                    chunk.emit(OpCode::LoadLocal(subject_slot));
+                    let val = match lit {
+                        Literal::Int(n) => Value::Int(*n),
+                        Literal::Float(s) => Value::Float(s.parse().unwrap_or(0.0)),
+                        Literal::String(s) => Value::String(s.clone()),
+                        Literal::Bool(b) => Value::Bool(*b),
+                    };
+                    let cidx = chunk.add_const(val);
+                    chunk.emit(OpCode::LoadConst(cidx));
+                    chunk.emit(OpCode::Eq);
+                    let jif = chunk.emit_jump(OpCode::JumpIfFalse(0));
+                    let prev_depth = self.scope_depth;
+                    self.scope_depth += 1;
+                    self.compile_expr(&arm.expr, chunk)?;
+                    self.scope_depth = prev_depth;
+                    let jmp = chunk.emit_jump(OpCode::Jump(0));
+                    end_jumps.push(jmp);
+                    let next = chunk.code.len();
+                    chunk.patch_jump(jif, next);
+                }
+                Pattern::EnumTuple { name, elems, .. } => {
+                    // Check if subject is this variant
+                    chunk.emit(OpCode::LoadLocal(subject_slot));
+                    chunk.emit(OpCode::IsVariant(name.clone()));
+                    let jif = chunk.emit_jump(OpCode::JumpIfFalse(0));
+
+                    // Bind payload elements
+                    let mut binding_slots = Vec::new();
+                    for (i, elem_pat) in elems.iter().enumerate() {
+                        if let Pattern::Ident(bind_name, _) = elem_pat {
+                            let slot = self.locals.len();
+                            self.locals.push(bind_name.clone());
+                            binding_slots.push(slot);
+                            chunk.emit(OpCode::LoadLocal(subject_slot));
+                            chunk.emit(OpCode::ExtractPayload(i));
+                            chunk.emit(OpCode::StoreLocal(slot));
+                        }
+                    }
+
+                    let prev_depth = self.scope_depth;
+                    self.scope_depth += 1;
+                    self.compile_expr(&arm.expr, chunk)?;
+                    self.scope_depth = prev_depth;
+                    let jmp = chunk.emit_jump(OpCode::Jump(0));
+                    end_jumps.push(jmp);
+                    let next = chunk.code.len();
+                    chunk.patch_jump(jif, next);
+
+                    // Pop binding locals
+                    for _ in &binding_slots {
+                        self.locals.pop();
+                    }
+                }
+                _ => {
+                    // Fallback: push Unit for unsupported patterns
+                    let idx = chunk.add_const(Value::Unit);
+                    chunk.emit(OpCode::LoadConst(idx));
+                    let jmp = chunk.emit_jump(OpCode::Jump(0));
+                    end_jumps.push(jmp);
+                }
+            }
+        }
+
+        // No arm matched — push Unit
+        let idx = chunk.add_const(Value::Unit);
+        chunk.emit(OpCode::LoadConst(idx));
+
+        let end = chunk.code.len();
+        for jmp in end_jumps {
+            chunk.patch_jump(jmp, end);
+        }
+
+        self.locals.pop(); // __match__
         Ok(())
     }
 

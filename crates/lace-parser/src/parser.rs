@@ -1575,6 +1575,27 @@ impl Parser {
     fn parse_type_ident_expr(&mut self) -> Option<Expr> {
         let start = self.curr_span().start;
         let name = self.expect_type_ident()?;
+        // TypeIdent(...) — variant constructor call e.g. Some(x), Ok(v), Err(e)
+        if self.match_tok(&TokenKind::LParen) {
+            let mut args = Vec::new();
+            if !self.at(&TokenKind::RParen) {
+                loop {
+                    args.push(self.parse_expr()?);
+                    if self.match_tok(&TokenKind::Comma) {
+                        if self.at(&TokenKind::RParen) { break; }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+            return Some(Expr::FnCall(FnCallExpr {
+                name,
+                args,
+                type_arg: None,
+                span: Span { start, end: self.prev_span().end },
+            }));
+        }
         if self.match_tok(&TokenKind::LBrace) {
             let mut fields = Vec::new();
             while !self.at(&TokenKind::RBrace) && !self.at(&TokenKind::Eof) {

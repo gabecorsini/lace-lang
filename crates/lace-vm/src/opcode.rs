@@ -44,6 +44,12 @@ pub enum OpCode {
     Unwrap,
     IsOk,
     IsSome,
+    /// Duplicate the top-of-stack value.
+    Dup,
+    /// Peek TOS (must be Variant); push Bool: does it have this name?
+    IsVariant(String),
+    /// Pop TOS (must be Variant); push payload[index].
+    ExtractPayload(usize),
     Print,
     Halt,
 }

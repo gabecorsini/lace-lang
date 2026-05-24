@@ -446,6 +446,26 @@ impl Vm {
                     let some = matches!(&val, Value::Variant { name, .. } if name == "Some");
                     self.stack.push(Value::Bool(some));
                 }
+                OpCode::Dup => {
+                    let val = self.stack.last().ok_or(VmError::StackUnderflow)?.clone();
+                    self.stack.push(val);
+                }
+                OpCode::IsVariant(ref variant_name) => {
+                    let val = self.stack.last().ok_or(VmError::StackUnderflow)?;
+                    let matches = matches!(val, Value::Variant { name, .. } if name == variant_name);
+                    self.stack.push(Value::Bool(matches));
+                }
+                OpCode::ExtractPayload(index) => {
+                    let val = self.stack.pop().ok_or(VmError::StackUnderflow)?;
+                    match val {
+                        Value::Variant { payload, .. } => {
+                            let v = payload.into_iter().nth(index)
+                                .ok_or_else(|| VmError::RuntimeError(format!("payload index {} out of range", index)))?;
+                            self.stack.push(v);
+                        }
+                        other => return Err(VmError::TypeError(format!("ExtractPayload on non-variant {:?}", other))),
+                    }
+                }
                 OpCode::Print => {
                     let val = self.stack.pop().ok_or(VmError::StackUnderflow)?;
                     println!("{}", display_value(&val));
@@ -577,6 +597,13 @@ impl Vm {
             "List.length" => match args.first() {
                 Some(Value::List(items)) => Ok(Value::Int(items.len() as i64)),
                 _ => Err(VmError::RuntimeError("List.length expects a List".into())),
+            },
+            "List.get" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(idx))) => {
+                    items.get(*idx as usize).cloned().ok_or_else(||
+                        VmError::RuntimeError(format!("List.get: index {} out of bounds", idx)))
+                }
+                _ => Err(VmError::RuntimeError("List.get expects (List, Int)".into())),
             },
             "List.range" => match (args.first(), args.get(1)) {
                 (Some(Value::Int(start)), Some(Value::Int(end))) => {
@@ -964,6 +991,14 @@ impl Vm {
             "Map.remove" => match (args.first().cloned(), args.get(1)) {
                 (Some(Value::Map(mut m)), Some(Value::String(k))) => { m.remove(k); Ok(Value::Map(m)) }
                 _ => Err(VmError::RuntimeError("Map.remove expects (Map, String)".into())),
+            },
+
+            "Env.set" => match (args.first(), args.get(1)) {
+                (Some(Value::String(key)), Some(Value::String(val))) => {
+                    std::env::set_var(key, val);
+                    Ok(Value::Unit)
+                }
+                _ => Err(VmError::RuntimeError("Env.set expects (String, String)".into())),
             },
 
             _ => Err(VmError::RuntimeError(format!("unknown stdlib builtin: {name}"))),
