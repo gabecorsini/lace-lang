@@ -71,6 +71,9 @@ enum Commands {
         /// Suppress tool effect logging (no journal file written)
         #[arg(long)]
         no_tool_log: bool,
+        /// Use the bytecode VM instead of the tree-walking interpreter
+        #[arg(long)]
+        vm: bool,
     },
     /// Run @test functions from a .lace file or directory
     Test {
@@ -134,6 +137,16 @@ enum Commands {
     ///
     /// Configure your editor to invoke `lace lsp` as the language server command.
     Lsp,
+    /// Compile a .lace file to bytecode (.lacec)
+    Compile {
+        /// Source file to compile
+        file: String,
+    },
+    /// Run a .lace or .lacec file using the bytecode VM
+    Vm {
+        /// Source (.lace) or bytecode (.lacec) file to run
+        file: String,
+    },
 }
 
 fn main() {
@@ -147,31 +160,39 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file, checkpoint, no_warnings, no_tool_log } => {
+        Commands::Run { file, checkpoint, no_warnings, no_tool_log, vm } => {
             let (file, _manifest) = resolve_entrypoint(file, "run")?;
             let source = load_source(&file)?;
-            let (program, effect_issues) = validate_source_with_warnings(&source, no_warnings)?;
 
-            print_effect_summary(&program, &effect_issues);
-
-            let options = RunOptions {
-                checkpoint_path: checkpoint.map(|p| p.display().to_string()),
-                replay_mode: false,
-                source_path: Some(file.display().to_string()),
-                suppress_tool_log: no_tool_log,
-            };
-
-            match run_with_options(&program, options) {
-                Ok(value) => {
-                    println!(
-                        "{} {}",
-                        "run ok:".green().bold(),
-                        render_value(&value).bright_white()
-                    );
+            if vm {
+                if let Err(e) = lace_vm::run_source(&source, true) {
+                    eprintln!("{} {}", "vm error:".red().bold(), format!("{e}").red());
+                    std::process::exit(1);
                 }
-                Err(err) => {
-                    report_runtime_error(&source, &err);
-                    anyhow::bail!("runtime execution failed");
+            } else {
+                let (program, effect_issues) = validate_source_with_warnings(&source, no_warnings)?;
+
+                print_effect_summary(&program, &effect_issues);
+
+                let options = RunOptions {
+                    checkpoint_path: checkpoint.map(|p| p.display().to_string()),
+                    replay_mode: false,
+                    source_path: Some(file.display().to_string()),
+                    suppress_tool_log: no_tool_log,
+                };
+
+                match run_with_options(&program, options) {
+                    Ok(value) => {
+                        println!(
+                            "{} {}",
+                            "run ok:".green().bold(),
+                            render_value(&value).bright_white()
+                        );
+                    }
+                    Err(err) => {
+                        report_runtime_error(&source, &err);
+                        anyhow::bail!("runtime execution failed");
+                    }
                 }
             }
         }
@@ -327,6 +348,37 @@ fn run() -> Result<()> {
             tokio::runtime::Runtime::new()
                 .expect("failed to create tokio runtime")
                 .block_on(lace_lsp::run_server());
+        }
+        Commands::Compile { file } => {
+            let source = fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {file}"))?;
+            match lace_vm::compile_to_bytes(&source) {
+                Ok(bytes) => {
+                    let out_path = PathBuf::from(&file).with_extension("lacec");
+                    fs::write(&out_path, &bytes)
+                        .with_context(|| format!("failed to write {}", out_path.display()))?;
+                    println!("compiled: {}", out_path.display());
+                }
+                Err(e) => {
+                    eprintln!("{} {}", "compile error:".red().bold(), format!("{e}").red());
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Vm { file } => {
+            let result = if file.ends_with(".lacec") {
+                let bytes = fs::read(&file)
+                    .with_context(|| format!("failed to read {file}"))?;
+                lace_vm::run_bytes(&bytes, true)
+            } else {
+                let source = fs::read_to_string(&file)
+                    .with_context(|| format!("failed to read {file}"))?;
+                lace_vm::run_source(&source, true)
+            };
+            if let Err(e) = result {
+                eprintln!("{} {}", "vm error:".red().bold(), format!("{e}").red());
+                std::process::exit(1);
+            }
         }
     }
 

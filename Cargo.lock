@@ -569,6 +569,7 @@ dependencies = [
  "lace-lsp",
  "lace-parser",
  "lace-types",
+ "lace-vm",
  "rustyline",
  "serde",
  "tokio",

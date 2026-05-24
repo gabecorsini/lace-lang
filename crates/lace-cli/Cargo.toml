@@ -24,4 +24,5 @@ lace-interp = { path = "../lace-interp" }
 lace-ast = { path = "../lace-ast" }
 rustyline.workspace = true
 lace-lsp = { path = "../lace-lsp" }
+lace-vm = { path = "../lace-vm" }
 tokio = { version = "1", features = ["rt"] }
