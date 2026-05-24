@@ -1,0 +1,19 @@
+@shell("echo \"hello from shell\"")
+tool shell_hello() -> Result<String, ToolError>
+
+@http("GET", "https://httpbin.org/get")
+tool fetch_httpbin() -> Result<String, ToolError>
+
+fn main() -> Unit [ToolCall, IO] {
+    println("real tools demo")
+
+    match shell_hello() {
+        Ok(output) => println("shell ok: " ++ output),
+        Err(err) => println("shell err: " ++ type_of(err)),
+    }
+
+    match fetch_httpbin() {
+        Ok(body) => println("http ok: " ++ body),
+        Err(err) => println("http err: " ++ type_of(err)),
+    }
+}

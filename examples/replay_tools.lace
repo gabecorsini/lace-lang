@@ -1,0 +1,9 @@
+@shell("echo \"hit from replay\"")
+tool replay_shell() -> Result<String, ToolError>
+
+fn main() -> Unit [ToolCall, IO] {
+    match replay_shell() {
+        Ok(out) => println("tool output: " ++ out),
+        Err(_err) => println("tool failed"),
+    }
+}

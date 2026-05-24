@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lace_ast::*;
@@ -81,12 +82,18 @@ pub struct JournalEntry {
 #[derive(Debug, Clone)]
 struct FunctionDef {
     params: Vec<String>,
+    effects: Vec<EffectExpr>,
     body: Block,
 }
 
 #[derive(Debug, Clone)]
 struct ToolDef {
     decl: ToolDecl,
+}
+
+#[derive(Debug, Clone)]
+struct CallFrame {
+    effects: Vec<EffectExpr>,
 }
 
 #[derive(Debug)]
@@ -151,6 +158,7 @@ pub struct Interpreter {
     env: Env,
     functions: HashMap<String, FunctionDef>,
     tools: HashMap<String, ToolDef>,
+    call_stack: Vec<CallFrame>,
 }
 
 impl Interpreter {
@@ -197,6 +205,7 @@ impl Interpreter {
             env: Env::new(),
             functions: HashMap::new(),
             tools: HashMap::new(),
+            call_stack: Vec::new(),
         }
     }
 
@@ -237,6 +246,7 @@ impl Interpreter {
                         f.name.clone(),
                         FunctionDef {
                             params: f.params.iter().map(|p| p.name.clone()).collect(),
+                            effects: f.effects.clone(),
                             body: f.body.clone(),
                         },
                     );
@@ -605,17 +615,23 @@ impl Interpreter {
             });
         }
 
+        self.call_stack.push(CallFrame {
+            effects: f.effects.clone(),
+        });
         self.env.push();
         for (p, a) in f.params.iter().zip(args.into_iter()) {
             self.env.define(p.clone(), a);
         }
 
-        let out = match self.eval_block(&f.body)? {
+        let eval_result = self.eval_block(&f.body);
+        self.env.pop();
+        self.call_stack.pop();
+
+        let out = match eval_result? {
             EvalFlow::Value(v) => v,
             EvalFlow::Return(v) => v,
         };
 
-        self.env.pop();
         Ok(out)
     }
 
@@ -623,6 +639,12 @@ impl Interpreter {
         match name {
             "print" | "println" => {
                 if let Some(entry) = self.replay_entry_for(name, "IO") {
+                    let msg = args.get(0).map(display_value).unwrap_or_else(String::new);
+                    if name == "println" {
+                        println!("[REPLAYED] {msg}");
+                    } else {
+                        print!("[REPLAYED] {msg}");
+                    }
                     return Ok(Some(self.parse_replay_output(&entry.output)));
                 }
                 let msg = args.get(0).map(display_value).unwrap_or_else(String::new);
@@ -631,7 +653,7 @@ impl Interpreter {
                 } else {
                     print!("{msg}");
                 }
-                self.log_effect(name, "IO", json!(args), json!(Value::Unit), 0)?;
+                self.log_effect(name, "IO", json!(args), JsonValue::Null, 0)?;
                 Ok(Some(Value::Unit))
             }
             "type_of" => {
@@ -644,6 +666,7 @@ impl Interpreter {
             }
             "now_unix" => {
                 if let Some(entry) = self.replay_entry_for(name, "Time") {
+                    eprintln!("[REPLAYED] now_unix");
                     return Ok(Some(self.parse_replay_output(&entry.output)));
                 }
                 let val = SystemTime::now()
@@ -655,6 +678,7 @@ impl Interpreter {
             }
             "now_millis" => {
                 if let Some(entry) = self.replay_entry_for(name, "Time") {
+                    eprintln!("[REPLAYED] now_millis");
                     return Ok(Some(self.parse_replay_output(&entry.output)));
                 }
                 let val = SystemTime::now()
@@ -950,25 +974,9 @@ impl Interpreter {
             });
         };
 
-        if let Some(entry) = self.replay_entry_for(tool_name, "ToolCall") {
-            return Ok(self.parse_replay_output(&entry.output));
-        }
-
-        let started = Instant::now();
-
-        // mock option: call mock function if configured
-        for option in &tool.decl.options {
-            if let ToolOption::Mock(mock_name, _) = option {
-                let out = self.call_function(mock_name, args.clone(), span)?;
-                self.log_effect(
-                    tool_name,
-                    "ToolCall",
-                    json!(args),
-                    json!(out),
-                    started.elapsed().as_millis() as i64,
-                )?;
-                return Ok(out);
-            }
+        if let Some(entry) = self.replay_tool_entry_for(tool_name) {
+            eprintln!("[REPLAYED] tool {tool_name}");
+            return Ok(self.parse_replay_output(&entry.inputs));
         }
 
         let mut shell_cmd: Option<String> = None;
@@ -999,16 +1007,97 @@ impl Interpreter {
             }
         }
 
+        let effect_tag = if shell_cmd.is_some() {
+            "Shell"
+        } else if http_method.is_some() && http_url.is_some() {
+            "Http"
+        } else {
+            "ToolCall"
+        };
+
+        if let Some(frame) = self.call_stack.last() {
+            if is_pure_only(&frame.effects) {
+                panic!(
+                    "Effect violation: pure fn called tool with [{}] effect",
+                    effect_tag
+                );
+            }
+        }
+
+        let started = Instant::now();
+
+        // mock option: call mock function if configured
+        for option in &tool.decl.options {
+            if let ToolOption::Mock(mock_name, _) = option {
+                let out = self.call_function(mock_name, args.clone(), span)?;
+                self.log_effect(
+                    tool_name,
+                    effect_tag,
+                    value_to_json(&out),
+                    json!(args),
+                    started.elapsed().as_millis() as i64,
+                )?;
+                return Ok(out);
+            }
+        }
+
+        let timeout = tool_timeout_duration(&tool.decl.options);
+
         if let Some(cmd_template) = shell_cmd {
             let cmd = interpolate_template(&cmd_template, &tool.decl.params, &args);
-            let output = Command::new("bash")
-                .arg("-lc")
-                .arg(cmd)
-                .output()
-                .map_err(|e| RuntimeError {
-                    message: format!("shell tool '{}' failed to execute: {e}", tool_name),
-                    span: Some(span),
-                })?;
+            let output = match run_shell_with_timeout(&cmd, timeout) {
+                Ok(output) => output,
+                Err(ShellExecError::Timeout) => {
+                    let out = Value::Variant {
+                        name: "Err".into(),
+                        payload: vec![Value::Record {
+                            name: "ToolError".into(),
+                            fields: {
+                                let mut m = HashMap::new();
+                                m.insert("kind".into(), Value::String("Timeout".into()));
+                                m.insert(
+                                    "message".into(),
+                                    Value::String(format!(
+                                        "shell command timed out after {} ms",
+                                        timeout.as_millis()
+                                    )),
+                                );
+                                m
+                            },
+                        }],
+                    };
+                    self.log_effect(
+                        tool_name,
+                        effect_tag,
+                        value_to_json(&out),
+                        json!({"args": args, "command": cmd_template}),
+                        started.elapsed().as_millis() as i64,
+                    )?;
+                    return Ok(out);
+                }
+                Err(ShellExecError::Io(e)) => {
+                    let out = Value::Variant {
+                        name: "Err".into(),
+                        payload: vec![Value::Record {
+                            name: "ToolError".into(),
+                            fields: {
+                                let mut m = HashMap::new();
+                                m.insert("kind".into(), Value::String("IoError".into()));
+                                m.insert("message".into(), Value::String(e.to_string()));
+                                m
+                            },
+                        }],
+                    };
+                    self.log_effect(
+                        tool_name,
+                        effect_tag,
+                        value_to_json(&out),
+                        json!({"args": args, "command": cmd_template}),
+                        started.elapsed().as_millis() as i64,
+                    )?;
+                    return Ok(out);
+                }
+            };
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -1019,7 +1108,7 @@ impl Interpreter {
                         name: "ToolError".into(),
                         fields: {
                             let mut m = HashMap::new();
-                            m.insert("kind".into(), Value::String("ShellFailure".into()));
+                            m.insert("kind".into(), Value::String("ExitFailure".into()));
                             m.insert(
                                 "message".into(),
                                 Value::String(format!(
@@ -1029,18 +1118,19 @@ impl Interpreter {
                                 )),
                             );
                             m.insert(
-                                "status".into(),
+                                "code".into(),
                                 Value::Int(output.status.code().unwrap_or(-1) as i64),
                             );
+                            m.insert("stderr".into(), Value::String(stderr.clone()));
                             m
                         },
                     }],
                 };
                 self.log_effect(
                     tool_name,
-                    "ToolCall",
-                    json!(args),
-                    json!(out),
+                    effect_tag,
+                    value_to_json(&out),
+                    json!({"args": args, "command": cmd_template}),
                     started.elapsed().as_millis() as i64,
                 )?;
                 return Ok(out);
@@ -1049,9 +1139,9 @@ impl Interpreter {
             let parsed = parse_tool_success_output(&tool.decl.ret_ty, &stdout);
             self.log_effect(
                 tool_name,
-                "ToolCall",
-                json!(args),
-                json!(parsed),
+                effect_tag,
+                value_to_json(&parsed),
+                json!({"args": args, "command": cmd_template}),
                 started.elapsed().as_millis() as i64,
             )?;
             return Ok(parsed);
@@ -1060,13 +1150,13 @@ impl Interpreter {
         if let (Some(method), Some(url_template)) = (http_method, http_url) {
             let url = interpolate_template(&url_template, &tool.decl.params, &args);
             let method_upper = method.to_uppercase();
-            let client = reqwest::blocking::Client::new();
-            let req = match method_upper.as_str() {
-                "GET" => client.get(&url),
-                "POST" => client.post(&url),
-                "PUT" => client.put(&url),
-                "PATCH" => client.patch(&url),
-                "DELETE" => client.delete(&url),
+            let mut req = match method_upper.as_str() {
+                "GET" => ureq::get(&url),
+                "POST" => {
+                    let mut b = ureq::post(&url);
+                    b = b.set("content-type", "application/json");
+                    b
+                }
                 _ => {
                     return Err(RuntimeError {
                         message: format!("unsupported @http method '{}'", method),
@@ -1075,46 +1165,91 @@ impl Interpreter {
                 }
             };
 
-            let response = req.send().map_err(|e| RuntimeError {
-                message: format!("http tool '{}' request failed: {e}", tool_name),
-                span: Some(span),
-            })?;
-            let status = response.status().as_u16() as i64;
-            let body = response.text().unwrap_or_default();
-            if status >= 400 {
-                let out = Value::Variant {
-                    name: "Err".into(),
-                    payload: vec![Value::Record {
-                        name: "ToolError".into(),
-                        fields: {
-                            let mut m = HashMap::new();
-                            m.insert("kind".into(), Value::String("HttpFailure".into()));
-                            m.insert(
-                                "message".into(),
-                                Value::String(format!("http {} {} failed", method_upper, url)),
-                            );
-                            m.insert("status".into(), Value::Int(status));
-                            m.insert("body".into(), Value::String(body.clone()));
-                            m
-                        },
-                    }],
-                };
-                self.log_effect(
-                    tool_name,
-                    "ToolCall",
-                    json!(args),
-                    json!(out),
-                    started.elapsed().as_millis() as i64,
-                )?;
-                return Ok(out);
-            }
+            let timeout_ms = timeout.as_millis() as u64;
+            req = req.timeout(timeout);
 
+            let response_result = if method_upper == "POST" {
+                let body = args
+                    .first()
+                    .map(value_to_json)
+                    .unwrap_or_else(|| JsonValue::String(String::new()));
+                req.send_string(&body.to_string())
+            } else {
+                req.call()
+            };
+
+            let response = match response_result {
+                Ok(resp) => resp,
+                Err(ureq::Error::Status(status, resp)) => {
+                    let body = resp.into_string().unwrap_or_default();
+                    let out = Value::Variant {
+                        name: "Err".into(),
+                        payload: vec![Value::Record {
+                            name: "ToolError".into(),
+                            fields: {
+                                let mut m = HashMap::new();
+                                m.insert("kind".into(), Value::String("HttpError".into()));
+                                m.insert("status".into(), Value::Int(status as i64));
+                                m.insert(
+                                    "message".into(),
+                                    Value::String(format!("http {} {} failed", method_upper, url)),
+                                );
+                                m.insert("body".into(), Value::String(body.clone()));
+                                m
+                            },
+                        }],
+                    };
+                    self.log_effect(
+                        tool_name,
+                        effect_tag,
+                        value_to_json(&out),
+                        json!({"args": args, "url": url, "method": method_upper, "status": status as i64, "timeout_ms": timeout_ms}),
+                        started.elapsed().as_millis() as i64,
+                    )?;
+                    return Ok(out);
+                }
+                Err(ureq::Error::Transport(t)) => {
+                    let kind = if t.kind() == ureq::ErrorKind::Io {
+                        "Timeout"
+                    } else {
+                        "NetworkError"
+                    };
+                    let message = if kind == "Timeout" {
+                        format!("http request timed out after {} ms", timeout_ms)
+                    } else {
+                        t.message().unwrap_or("network transport error").to_string()
+                    };
+                    let out = Value::Variant {
+                        name: "Err".into(),
+                        payload: vec![Value::Record {
+                            name: "ToolError".into(),
+                            fields: {
+                                let mut m = HashMap::new();
+                                m.insert("kind".into(), Value::String(kind.into()));
+                                m.insert("message".into(), Value::String(message));
+                                m
+                            },
+                        }],
+                    };
+                    self.log_effect(
+                        tool_name,
+                        effect_tag,
+                        value_to_json(&out),
+                        json!({"args": args, "url": url, "method": method_upper, "timeout_ms": timeout_ms}),
+                        started.elapsed().as_millis() as i64,
+                    )?;
+                    return Ok(out);
+                }
+            };
+
+            let status = response.status() as i64;
+            let body = response.into_string().unwrap_or_default();
             let parsed = parse_tool_success_output(&tool.decl.ret_ty, &body);
             self.log_effect(
                 tool_name,
-                "ToolCall",
-                json!(args),
-                json!(parsed),
+                effect_tag,
+                value_to_json(&parsed),
+                json!({"args": args, "url": url, "method": method_upper, "status": status, "timeout_ms": timeout_ms}),
                 started.elapsed().as_millis() as i64,
             )?;
             return Ok(parsed);
@@ -1123,9 +1258,9 @@ impl Interpreter {
         let placeholder = placeholder_for_type(&tool.decl.ret_ty);
         self.log_effect(
             tool_name,
-            "ToolCall",
+            effect_tag,
+            value_to_json(&placeholder),
             json!(args),
-            json!(placeholder),
             started.elapsed().as_millis() as i64,
         )?;
 
@@ -1176,6 +1311,21 @@ impl Interpreter {
             let entry = replay.entries[replay.pos].clone();
             replay.pos += 1;
             if entry.fn_name == fn_name && entry.effect == effect {
+                self.seq = self.seq.max(entry.seq);
+                return Some(entry);
+            }
+        }
+        None
+    }
+
+    fn replay_tool_entry_for(&mut self, fn_name: &str) -> Option<JournalEntry> {
+        let replay = self.replay.as_mut()?;
+        while replay.pos < replay.entries.len() {
+            let entry = replay.entries[replay.pos].clone();
+            replay.pos += 1;
+            if entry.fn_name == fn_name
+                && (entry.effect == "ToolCall" || entry.effect == "Shell" || entry.effect == "Http")
+            {
                 self.seq = self.seq.max(entry.seq);
                 return Some(entry);
             }
@@ -1416,6 +1566,64 @@ fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
         }
     }
     Ok(ReplayCursor { entries, pos: 0 })
+}
+
+enum ShellExecError {
+    Timeout,
+    Io(std::io::Error),
+}
+
+fn run_shell_with_timeout(cmd: &str, timeout: Duration) -> Result<Output, ShellExecError> {
+    let mut child = Command::new("bash")
+        .arg("-lc")
+        .arg(cmd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(ShellExecError::Io)?;
+
+    let started = Instant::now();
+    loop {
+        if let Some(_status) = child.try_wait().map_err(ShellExecError::Io)? {
+            return child.wait_with_output().map_err(ShellExecError::Io);
+        }
+
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(ShellExecError::Timeout);
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn tool_timeout_duration(options: &[ToolOption]) -> Duration {
+    for option in options {
+        if let ToolOption::Timeout(duration, _) = option {
+            return duration_lit_to_std(duration.clone());
+        }
+    }
+    Duration::from_secs(30)
+}
+
+fn duration_lit_to_std(duration: DurationLit) -> Duration {
+    let value = duration.value.max(0) as u64;
+    match duration.unit {
+        DurationUnit::Ms => Duration::from_millis(value),
+        DurationUnit::S => Duration::from_secs(value),
+        DurationUnit::M => Duration::from_secs(value.saturating_mul(60)),
+        DurationUnit::H => Duration::from_secs(value.saturating_mul(3600)),
+    }
+}
+
+fn is_pure_only(effects: &[EffectExpr]) -> bool {
+    if effects.is_empty() {
+        return false;
+    }
+    effects
+        .iter()
+        .all(|e| matches!(e, EffectExpr::Builtin(EffectTag::Pure)))
 }
 
 fn interpolate_template(template: &str, params: &[ToolParam], args: &[Value]) -> String {
