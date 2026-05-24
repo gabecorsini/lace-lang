@@ -71,6 +71,9 @@ enum Commands {
         /// Suppress tool effect logging (no journal file written)
         #[arg(long)]
         no_tool_log: bool,
+        /// Write structured tool-call log to this file
+        #[arg(long, value_name = "PATH")]
+        log_file: Option<String>,
         /// Use the bytecode VM instead of the tree-walking interpreter
         #[arg(long)]
         vm: bool,
@@ -160,7 +163,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file, checkpoint, no_warnings, no_tool_log, vm } => {
+        Commands::Run { file, checkpoint, no_warnings, no_tool_log, log_file, vm } => {
             let (file, _manifest) = resolve_entrypoint(file, "run")?;
             let source = load_source(&file)?;
 
@@ -179,6 +182,7 @@ fn run() -> Result<()> {
                     replay_mode: false,
                     source_path: Some(file.display().to_string()),
                     suppress_tool_log: no_tool_log,
+                    log_file,
                 };
 
                 match run_with_options(&program, options) {
@@ -229,6 +233,7 @@ fn run() -> Result<()> {
                     replay_mode: false,
                     source_path: Some(file.display().to_string()),
                     suppress_tool_log: false,
+                    log_file: None,
                 };
 
                 match run_function_with_options(&program, &test_name, options) {
@@ -284,6 +289,7 @@ fn run() -> Result<()> {
                 replay_mode: true,
                 source_path: Some(file.display().to_string()),
                 suppress_tool_log: false,
+                log_file: None,
             };
             match run_with_options(&program, options) {
                 Ok(value) => {
@@ -806,6 +812,7 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
         replay_mode: false,
         source_path: None,
         suppress_tool_log: false,
+        log_file: None,
     };
     if let Some(replay_path) = replay {
         default_options.checkpoint_path = Some(replay_path.display().to_string());

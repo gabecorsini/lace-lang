@@ -1,0 +1,20 @@
+## Phase 20 — Structured Runtime Logging
+## Run with: lace run examples/phase20.lace
+## Run with log file: lace run --log-file /tmp/lace-run.log examples/phase20.lace
+##
+## Each tool call automatically emits structured JSON to stderr:
+## {"event":"tool_call","tool":"fetch_status","args":["prod"],"ts_ms":...,"run_id":"..."}
+## {"event":"tool_ok","tool":"fetch_status","result_type":"Ok","duration_ms":2,"run_id":"..."}
+## At the end: [lace] run_id=...  tools=1  ok=1  err=0
+
+@retry(max: 2)
+tool fetch_status(env: String) -> Result<String, String> {
+    # Simulates an HTTP check — in real use, call Http.get(...)
+    Ok("healthy")
+}
+
+let result = fetch_status("prod")
+match result {
+    Ok(msg) => print("Status: " ++ msg),
+    Err(e)  => print("Error: " ++ e),
+}

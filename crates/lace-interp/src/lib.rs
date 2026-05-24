@@ -6,6 +6,9 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub mod tool_log;
+pub use tool_log::ToolLogger;
+
 use lace_ast::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -50,6 +53,7 @@ pub struct RunOptions {
     pub replay_mode: bool,
     pub source_path: Option<String>,
     pub suppress_tool_log: bool,
+    pub log_file: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -59,6 +63,7 @@ impl Default for RunOptions {
             replay_mode: false,
             source_path: None,
             suppress_tool_log: false,
+            log_file: None,
         }
     }
 }
@@ -187,7 +192,7 @@ pub struct Interpreter {
     loop_signal: Option<LoopSignal>,
     return_value: Option<Value>,
     variant_constructors: HashSet<String>,
-    suppress_tool_log: bool,
+    tool_logger: ToolLogger,
 }
 
 impl Interpreter {
@@ -245,7 +250,7 @@ impl Interpreter {
             loop_signal: None,
             return_value: None,
             variant_constructors: HashSet::new(),
-            suppress_tool_log: options.suppress_tool_log,
+            tool_logger: ToolLogger::new(options.suppress_tool_log, options.log_file.as_deref()),
         }
     }
 
@@ -280,6 +285,10 @@ impl Interpreter {
             self.save_checkpoint_state()?;
         }
 
+        if let Some(summary) = self.tool_logger.summary() {
+            eprintln!("{summary}");
+        }
+
         Ok(out)
     }
 
@@ -311,6 +320,10 @@ impl Interpreter {
 
         if self.checkpoint_path.is_some() {
             self.save_checkpoint_state()?;
+        }
+
+        if let Some(summary) = self.tool_logger.summary() {
+            eprintln!("{summary}");
         }
 
         Ok(out)
@@ -2473,10 +2486,17 @@ impl Interpreter {
 
         let started = Instant::now();
 
+        // Log the tool call
+        {
+            let arg_strs: Vec<String> = args.iter().map(|v| format!("{v:?}")).collect();
+            self.tool_logger.log_call(tool_name, &arg_strs);
+        }
+
         // mock option: call mock function if configured
         for option in &tool.decl.options {
             if let ToolOption::Mock(mock_name, _) = option {
                 let out = self.call_function(mock_name, args.clone(), span)?;
+                let duration_ms = started.elapsed().as_millis() as u64;
                 self.log_effect(
                     tool_name,
                     effect_tag,
@@ -2484,6 +2504,12 @@ impl Interpreter {
                     json!(args),
                     started.elapsed().as_millis() as i64,
                 )?;
+                let is_err = matches!(&out, Value::Variant { name, .. } if name == "Err");
+                if is_err {
+                    self.tool_logger.log_err(tool_name, "mock returned Err", duration_ms);
+                } else {
+                    self.tool_logger.log_ok(tool_name, duration_ms);
+                }
                 return Ok(out);
             }
         }
@@ -2520,6 +2546,7 @@ impl Interpreter {
                         json!({"args": args, "command": cmd_template}),
                         started.elapsed().as_millis() as i64,
                     )?;
+                    self.tool_logger.log_err(tool_name, "shell timeout", started.elapsed().as_millis() as u64);
                     return Ok(out);
                 }
                 Err(ShellExecError::Io(e)) => {
@@ -2542,6 +2569,7 @@ impl Interpreter {
                         json!({"args": args, "command": cmd_template}),
                         started.elapsed().as_millis() as i64,
                     )?;
+                    self.tool_logger.log_err(tool_name, "shell io error", started.elapsed().as_millis() as u64);
                     return Ok(out);
                 }
             };
@@ -2580,6 +2608,7 @@ impl Interpreter {
                     json!({"args": args, "command": cmd_template}),
                     started.elapsed().as_millis() as i64,
                 )?;
+                self.tool_logger.log_err(tool_name, "shell exit failure", started.elapsed().as_millis() as u64);
                 return Ok(out);
             }
 
@@ -2591,6 +2620,7 @@ impl Interpreter {
                 json!({"args": args, "command": cmd_template}),
                 started.elapsed().as_millis() as i64,
             )?;
+            self.tool_logger.log_ok(tool_name, started.elapsed().as_millis() as u64);
             return Ok(parsed);
         }
 
@@ -2654,6 +2684,7 @@ impl Interpreter {
                         json!({"args": args, "url": url, "method": method_upper, "status": status as i64, "timeout_ms": timeout_ms}),
                         started.elapsed().as_millis() as i64,
                     )?;
+                    self.tool_logger.log_err(tool_name, &format!("http status {status}"), started.elapsed().as_millis() as u64);
                     return Ok(out);
                 }
                 Err(ureq::Error::Transport(t)) => {
@@ -2686,6 +2717,7 @@ impl Interpreter {
                         json!({"args": args, "url": url, "method": method_upper, "timeout_ms": timeout_ms}),
                         started.elapsed().as_millis() as i64,
                     )?;
+                    self.tool_logger.log_err(tool_name, kind, started.elapsed().as_millis() as u64);
                     return Ok(out);
                 }
             };
@@ -2700,6 +2732,7 @@ impl Interpreter {
                 json!({"args": args, "url": url, "method": method_upper, "status": status, "timeout_ms": timeout_ms}),
                 started.elapsed().as_millis() as i64,
             )?;
+            self.tool_logger.log_ok(tool_name, started.elapsed().as_millis() as u64);
             return Ok(parsed);
         }
 
@@ -2711,6 +2744,7 @@ impl Interpreter {
             json!(args),
             started.elapsed().as_millis() as i64,
         )?;
+        self.tool_logger.log_ok(tool_name, started.elapsed().as_millis() as u64);
 
         Ok(placeholder)
     }
@@ -2795,9 +2829,6 @@ impl Interpreter {
         output: JsonValue,
         duration_ms: i64,
     ) -> Result<(), RuntimeError> {
-        if self.suppress_tool_log {
-            return Ok(());
-        }
         self.seq += 1;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use lace_interp::Value;
+use lace_interp::{ToolLogger, Value};
 
 use crate::chunk::Chunk;
 use crate::error::VmError;
@@ -19,7 +18,7 @@ pub struct Vm {
     frames: Vec<CallFrame>,
     globals: HashMap<String, Value>,
     chunks: Vec<Chunk>,
-    tool_log: bool,
+    tool_logger: ToolLogger,
 }
 
 impl Vm {
@@ -31,7 +30,18 @@ impl Vm {
                 globals.insert(chunk.name.clone(), Value::Int(i as i64));
             }
         }
-        Vm { stack: Vec::new(), frames: Vec::new(), globals, chunks, tool_log }
+        let tool_logger = ToolLogger::new(!tool_log, None);
+        Vm { stack: Vec::new(), frames: Vec::new(), globals, chunks, tool_logger }
+    }
+
+    pub fn new_with_logger(chunks: Vec<Chunk>, tool_logger: ToolLogger) -> Self {
+        let mut globals = HashMap::new();
+        for (i, chunk) in chunks.iter().enumerate() {
+            if chunk.name != "main" {
+                globals.insert(chunk.name.clone(), Value::Int(i as i64));
+            }
+        }
+        Vm { stack: Vec::new(), frames: Vec::new(), globals, chunks, tool_logger }
     }
 
     fn chunk_idx_by_name(&self, name: &str) -> Option<usize> {
@@ -58,8 +68,15 @@ impl Vm {
                 locals: Vec::new(),
                 base: 0,
             });
-            self.execute()
+            let result = self.execute();
+            if let Some(summary) = self.tool_logger.summary() {
+                eprintln!("{summary}");
+            }
+            result
         } else {
+            if let Some(summary) = self.tool_logger.summary() {
+                eprintln!("{summary}");
+            }
             Ok(Value::Unit)
         }
     }
@@ -335,22 +352,15 @@ impl Vm {
                     args.reverse();
 
                     let tool_name = self.chunks[target_chunk_idx].name.clone();
-                    let ts_ms = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64;
-                    if self.tool_log {
-                        eprintln!(r#"{{"event":"tool_call","tool":"{}","timestamp":{}}}"#, tool_name, ts_ms);
-                    }
+                    let arg_strs: Vec<String> = args.iter().map(|v| format!("{v:?}")).collect();
+                    self.tool_logger.log_call(&tool_name, &arg_strs);
                     let start = std::time::Instant::now();
 
                     // Tool stubs just return Unit (no body to execute)
                     self.stack.push(Value::Unit);
 
                     let duration_ms = start.elapsed().as_millis() as u64;
-                    if self.tool_log {
-                        eprintln!(r#"{{"event":"tool_ok","tool":"{}","duration_ms":{}}}"#, tool_name, duration_ms);
-                    }
+                    self.tool_logger.log_ok(&tool_name, duration_ms);
                     let _ = args;
                 }
                 OpCode::Return => {
