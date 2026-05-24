@@ -1905,19 +1905,24 @@ impl Interpreter {
                 }),
             },
             "unwrap" => match target {
-                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                Value::Variant { name, payload } if (name == "Some" || name == "Ok" || name == "Confident") && payload.len() == 1 => {
                     Ok(payload[0].clone())
                 }
-                Value::Variant { name, payload } if name == "Confident" && payload.len() == 1 => {
-                    Ok(payload[0].clone())
+                Value::Variant { name, payload } if name == "Ok" && payload.is_empty() => {
+                    Ok(Value::Unit)
                 }
                 Value::Variant { name, .. } if name == "None" => Err(RuntimeError {
                     message: "unwrap called on None".into(),
                     span: Some(span),
                     propagated_err: None,
                 }),
+                Value::Variant { name, payload } if name == "Err" => Err(RuntimeError {
+                    message: format!("unwrap called on Err({})", payload.first().map(display_value).unwrap_or_default()),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
                 _ => Err(RuntimeError {
-                    message: "unwrap expects Some(_) or Confident(_)".into(),
+                    message: "unwrap expects Some(_), Ok(_), or Confident(_)".into(),
                     span: Some(span),
                     propagated_err: None,
                 }),
@@ -3484,10 +3489,28 @@ fn display_value(v: &Value) -> String {
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
         Value::String(s) => s.clone(),
-        Value::List(xs) => format!("{:?}", xs),
-        Value::Tuple(xs) => format!("{:?}", xs),
-        Value::Record { name, fields } => format!("{} {:?}", name, fields),
-        Value::Variant { name, payload } => format!("{}{:?}", name, payload),
+        Value::List(xs) => {
+            let inner: Vec<String> = xs.iter().map(display_value).collect();
+            format!("[{}]", inner.join(", "))
+        }
+        Value::Tuple(xs) => {
+            let inner: Vec<String> = xs.iter().map(display_value).collect();
+            format!("({})", inner.join(", "))
+        }
+        Value::Record { name, fields } => {
+            let mut pairs: Vec<_> = fields.iter().collect();
+            pairs.sort_by_key(|(k, _)| k.as_str());
+            let inner: Vec<String> = pairs.iter().map(|(k, v)| format!("{}: {}", k, display_value(v))).collect();
+            format!("{} {{ {} }}", name, inner.join(", "))
+        }
+        Value::Variant { name, payload } if payload.is_empty() => name.clone(),
+        Value::Variant { name, payload } if payload.len() == 1 => {
+            format!("{}({})", name, display_value(&payload[0]))
+        }
+        Value::Variant { name, payload } => {
+            let inner: Vec<String> = payload.iter().map(display_value).collect();
+            format!("{}({})", name, inner.join(", "))
+        }
         Value::Map(m) => {
             let mut pairs: Vec<_> = m.iter().collect();
             pairs.sort_by_key(|(k, _)| k.as_str());

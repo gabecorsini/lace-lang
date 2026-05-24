@@ -82,8 +82,12 @@ impl Vm {
     }
 
     fn execute(&mut self) -> Result<Value, VmError> {
+        self.execute_until(0)
+    }
+
+    fn execute_until(&mut self, stop_at_depth: usize) -> Result<Value, VmError> {
         loop {
-            if self.frames.is_empty() {
+            if self.frames.len() <= stop_at_depth {
                 return Ok(self.stack.pop().unwrap_or(Value::Unit));
             }
 
@@ -473,13 +477,14 @@ impl Vm {
                 self.chunks[chunk_idx].name, arity, args.len()
             )));
         }
+        let target_depth = self.frames.len();
         self.frames.push(CallFrame {
             chunk_idx,
             ip: 0,
             locals: args,
             base: self.stack.len(),
         });
-        self.execute()
+        self.execute_until(target_depth)
     }
 
     fn call_stdlib_builtin(&mut self, name: &str, args: Vec<Value>) -> Result<Value, VmError> {
