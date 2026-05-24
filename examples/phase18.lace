@@ -1,0 +1,47 @@
+# Phase 18: tool keyword, effect enforcement, W004 warning, structured logging
+#
+# Demonstrates:
+#   1. A tool with retries that wraps Http.get
+#   2. A pure fn that processes the result (string manipulation only)
+#   3. W004: calling Http.* from a plain fn triggers a warning —
+#            see below in process_raw (it only does string work, so no W004)
+#   4. Print output showing the pipeline works
+
+# Mock function used by the tool so the example runs without network access
+fn mock_fetch(url: String) -> Dynamic [Pure] {
+    Ok("HTTP/200 content-type: application/json\nbody: {\"status\":\"ok\",\"phase\":18}")
+}
+
+# A tool with 3 retries and a mock for offline demonstration.
+# In production, remove the mock: line and the @http annotation would send a real request.
+#
+# NOTE: calling Http.get directly from a plain fn (not a tool) would emit:
+#   warning[W004]: fn 'some_fn' calls effectful 'Http.get' — consider declaring 'some_fn' as a tool
+tool fetch_status(url: String) -> Dynamic
+    retries: 3
+    mock: mock_fetch
+
+# Pure fn: only does string manipulation on the result — no effectful calls, no W004
+fn process_raw(raw: String) -> String [Pure] {
+    let trimmed = raw.trim()
+    "processed: " ++ trimmed
+}
+
+fn main() -> Unit [ToolCall, IO] {
+    println("=== Phase 18: tool keyword + effect enforcement ===")
+
+    let url = "https://example.com/api/status"
+    let result = fetch_status(url)
+
+    match result {
+        Ok(body) => {
+            let out = process_raw(to_string(body))
+            println("fetch ok — " ++ out)
+        },
+        Err(e) => {
+            println("fetch failed: " ++ to_string(e))
+        },
+    }
+
+    println("=== Phase 18 complete ===")
+}

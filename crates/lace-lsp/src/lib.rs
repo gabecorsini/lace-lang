@@ -100,23 +100,41 @@ pub fn compute_diagnostics(source: &str) -> Vec<Diagnostic> {
         }
 
         for warn in &type_warnings {
-            let TypeWarning::UnusedVariable {
-                name,
-                span_start,
-                span_end,
-            } = warn;
-            let range = span_to_range(source, *span_start, *span_end);
-            diags.push(Diagnostic {
-                range,
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String(warn.code().to_string())),
-                code_description: None,
-                source: Some("lace".to_string()),
-                message: format!("unused variable: `{name}`"),
-                related_information: None,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                data: None,
-            });
+            match warn {
+                TypeWarning::UnusedVariable { name, span_start, span_end } => {
+                    let range = span_to_range(source, *span_start, *span_end);
+                    diags.push(Diagnostic {
+                        range,
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String(warn.code().to_string())),
+                        code_description: None,
+                        source: Some("lace".to_string()),
+                        message: format!("unused variable: `{name}`"),
+                        related_information: None,
+                        tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                        data: None,
+                    });
+                }
+                TypeWarning::PureFnCallsEffectful { fn_name, callee } => {
+                    // No span for W004; emit a file-level diagnostic at position 0
+                    diags.push(Diagnostic {
+                        range: tower_lsp::lsp_types::Range {
+                            start: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                            end: tower_lsp::lsp_types::Position { line: 0, character: 0 },
+                        },
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        code: Some(NumberOrString::String("W004".to_string())),
+                        code_description: None,
+                        source: Some("lace".to_string()),
+                        message: format!(
+                            "fn '{fn_name}' calls effectful '{callee}' — consider declaring '{fn_name}' as a tool"
+                        ),
+                        related_information: None,
+                        tags: None,
+                        data: None,
+                    });
+                }
+            }
         }
     }
 
@@ -789,6 +807,33 @@ impl LanguageServer for LaceBackend {
         let is_method = prefix_before.trim_end().ends_with('.');
 
         let mut items: Vec<CompletionItem> = stdlib_completion_items();
+
+        // Keyword completions
+        let keywords: &[(&str, &str)] = &[
+            ("fn", "fn keyword — declare a function"),
+            ("tool", "tool keyword — declare a tool (effectful external call)"),
+            ("let", "let keyword — bind a value"),
+            ("mut", "mut keyword — mutable binding"),
+            ("if", "if keyword — conditional expression"),
+            ("else", "else keyword — else branch"),
+            ("match", "match keyword — pattern matching"),
+            ("for", "for keyword — for loop"),
+            ("while", "while keyword — while loop"),
+            ("return", "return keyword — early return"),
+            ("record", "record keyword — declare a record type"),
+            ("enum", "enum keyword — declare an enum type"),
+            ("import", "import keyword — import a module"),
+            ("const", "const keyword — declare a constant"),
+        ];
+        for (kw, detail) in keywords {
+            items.push(CompletionItem {
+                label: kw.to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some(detail.to_string()),
+                insert_text: Some(kw.to_string()),
+                ..Default::default()
+            });
+        }
 
         // Add user-defined symbols
         let symbols = collect_symbols(&source);

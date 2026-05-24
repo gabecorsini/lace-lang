@@ -123,11 +123,19 @@ pub enum TypeWarning {
         span_start: usize,
         span_end: usize,
     },
+    /// W004: pure fn calls effectful function — consider declaring it as a tool
+    PureFnCallsEffectful {
+        fn_name: String,
+        callee: String,
+    },
 }
 
 impl TypeWarning {
     pub fn code(&self) -> &'static str {
-        "W001"
+        match self {
+            TypeWarning::UnusedVariable { .. } => "W001",
+            TypeWarning::PureFnCallsEffectful { .. } => "W004",
+        }
     }
 }
 
@@ -136,6 +144,12 @@ impl std::fmt::Display for TypeWarning {
         match self {
             TypeWarning::UnusedVariable { name, .. } => {
                 write!(f, "[W001] unused variable '{name}'")
+            }
+            TypeWarning::PureFnCallsEffectful { fn_name, callee } => {
+                write!(
+                    f,
+                    "[W004] fn '{fn_name}' calls effectful '{callee}' — consider declaring '{fn_name}' as a tool"
+                )
             }
         }
     }
@@ -163,7 +177,7 @@ pub fn check_program_full(program: &Program) -> (Vec<TypeError>, Vec<TypeWarning
     checker.check(program);
 
     // Build W001 warnings: let bindings never referenced
-    let mut warnings = Vec::new();
+    let mut warnings = checker.warnings;
     for (name, span_start, span_end) in &checker.let_bindings {
         if !checker.used_idents.contains(name.as_str()) {
             warnings.push(TypeWarning::UnusedVariable {
@@ -183,10 +197,15 @@ struct Checker {
     record_types: HashMap<String, BTreeMap<String, Type>>,
     enum_variants: HashMap<String, Vec<String>>,
     errors: Vec<TypeError>,
+    warnings: Vec<TypeWarning>,
     /// All let-binding names with their span, for W001 tracking
     let_bindings: Vec<(String, usize, usize)>,
     /// All identifier names that were looked up (referenced), for W001 tracking
     used_idents: HashSet<String>,
+    /// Names declared as `tool` (for W004 detection)
+    tool_names: HashSet<String>,
+    /// Name of the fn currently being checked (None when in a tool body)
+    current_fn: Option<String>,
 }
 
 impl Checker {
@@ -199,8 +218,11 @@ impl Checker {
             record_types: HashMap::new(),
             enum_variants: HashMap::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             let_bindings: Vec::new(),
             used_idents: HashSet::new(),
+            tool_names: HashSet::new(),
+            current_fn: None,
         };
         checker.install_prelude();
         checker
@@ -482,6 +504,7 @@ impl Checker {
                         .collect::<Vec<_>>();
                     let ret = self.resolve_type_expr(&t.ret_ty);
                     self.fn_sigs.insert(t.name.clone(), (params, ret));
+                    self.tool_names.insert(t.name.clone());
                 }
                 TopLevelItem::Enum(e) => {
                     let variants = e.variants.iter().map(|v| v.name.clone()).collect();
@@ -633,6 +656,8 @@ impl Checker {
     }
 
     fn check_fn(&mut self, f: &FnDecl) {
+        let prev_fn = self.current_fn.take();
+        self.current_fn = Some(f.name.clone());
         self.push_scope();
         for p in &f.params {
             let ty = self.resolve_type_expr(&p.ty);
@@ -654,6 +679,7 @@ impl Checker {
         }
 
         self.pop_scope();
+        self.current_fn = prev_fn;
     }
 
     fn check_stmt(&mut self, stmt: &Stmt) {
@@ -829,6 +855,20 @@ impl Checker {
                     .iter()
                     .map(|a| self.infer_expr(a))
                     .collect::<Vec<_>>();
+
+                // W004: pure fn calls effectful callee
+                if let Some(fn_name) = self.current_fn.clone() {
+                    let is_effectful = call.name.starts_with("Http.")
+                        || call.name == "Env.set"
+                        || self.tool_names.contains(call.name.as_str());
+                    if is_effectful {
+                        self.warnings.push(TypeWarning::PureFnCallsEffectful {
+                            fn_name,
+                            callee: call.name.clone(),
+                        });
+                    }
+                }
+
                 if let Some((params, ret)) = self.fn_sigs.get(&call.name).cloned() {
                     for (i, arg) in args.iter().enumerate() {
                         if let Some(param) = params.get(i) {

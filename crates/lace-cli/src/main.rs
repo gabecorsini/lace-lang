@@ -68,6 +68,9 @@ enum Commands {
         /// Suppress warnings
         #[arg(long)]
         no_warnings: bool,
+        /// Suppress tool effect logging (no journal file written)
+        #[arg(long)]
+        no_tool_log: bool,
     },
     /// Run @test functions from a .lace file or directory
     Test {
@@ -144,7 +147,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file, checkpoint, no_warnings } => {
+        Commands::Run { file, checkpoint, no_warnings, no_tool_log } => {
             let (file, _manifest) = resolve_entrypoint(file, "run")?;
             let source = load_source(&file)?;
             let (program, effect_issues) = validate_source_with_warnings(&source, no_warnings)?;
@@ -155,6 +158,7 @@ fn run() -> Result<()> {
                 checkpoint_path: checkpoint.map(|p| p.display().to_string()),
                 replay_mode: false,
                 source_path: Some(file.display().to_string()),
+                suppress_tool_log: no_tool_log,
             };
 
             match run_with_options(&program, options) {
@@ -203,6 +207,7 @@ fn run() -> Result<()> {
                     checkpoint_path: checkpoint.clone().map(|p| p.display().to_string()),
                     replay_mode: false,
                     source_path: Some(file.display().to_string()),
+                    suppress_tool_log: false,
                 };
 
                 match run_function_with_options(&program, &test_name, options) {
@@ -257,6 +262,7 @@ fn run() -> Result<()> {
                 checkpoint_path: Some(checkpoint.display().to_string()),
                 replay_mode: true,
                 source_path: Some(file.display().to_string()),
+                suppress_tool_log: false,
             };
             match run_with_options(&program, options) {
                 Ok(value) => {
@@ -747,6 +753,7 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
         checkpoint_path: checkpoint.map(|p| p.display().to_string()),
         replay_mode: false,
         source_path: None,
+        suppress_tool_log: false,
     };
     if let Some(replay_path) = replay {
         default_options.checkpoint_path = Some(replay_path.display().to_string());
@@ -890,8 +897,14 @@ fn report_type_error(source: &str, err: &TypeError) {
 
 fn report_type_warning(source: &str, warn: &TypeWarning) {
     eprintln!("{} {}: {warn}", "warning".yellow().bold(), format!("[{}]", warn.code()).yellow());
-    let TypeWarning::UnusedVariable { span_start, span_end, .. } = warn;
-    eprintln!("{}", render_span_excerpt(source, *span_start, *span_end).dimmed());
+    match warn {
+        TypeWarning::UnusedVariable { span_start, span_end, .. } => {
+            eprintln!("{}", render_span_excerpt(source, *span_start, *span_end).dimmed());
+        }
+        TypeWarning::PureFnCallsEffectful { .. } => {
+            // No span available for W004
+        }
+    }
 }
 
 fn type_error_span(err: &TypeError) -> Option<(usize, usize)> {
@@ -1014,6 +1027,12 @@ fn print_error_explanation(code: &str) {
              Prefix the name with '_' to suppress this warning.\n\n\
              Example:\n  let unused = 42   // W001: unused variable 'unused'",
         )),
+        "W004" => Some((
+            "W004 — Pure fn calls effectful function",
+            "A plain fn calls an effectful function (Http.*, Env.set, or a tool). \
+             Consider declaring the fn as a tool to make the effect explicit.\n\n\
+             Example:\n  fn fetch_data() -> String {\n    Http.get(\"https://example.com\")  // W004\n  }",
+        )),
         _ => None,
     };
 
@@ -1025,7 +1044,7 @@ fn print_error_explanation(code: &str) {
         }
         None => {
             eprintln!(
-                "{}: unknown error code '{}'. Known codes: E001, E002, E003, E004, E005, W001",
+                "{}: unknown error code '{}'. Known codes: E001, E002, E003, E004, E005, W001, W004",
                 "error".red().bold(),
                 code
             );

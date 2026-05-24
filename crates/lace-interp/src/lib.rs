@@ -49,6 +49,7 @@ pub struct RunOptions {
     pub checkpoint_path: Option<String>,
     pub replay_mode: bool,
     pub source_path: Option<String>,
+    pub suppress_tool_log: bool,
 }
 
 impl Default for RunOptions {
@@ -57,6 +58,7 @@ impl Default for RunOptions {
             checkpoint_path: None,
             replay_mode: false,
             source_path: None,
+            suppress_tool_log: false,
         }
     }
 }
@@ -185,6 +187,7 @@ pub struct Interpreter {
     loop_signal: Option<LoopSignal>,
     return_value: Option<Value>,
     variant_constructors: HashSet<String>,
+    suppress_tool_log: bool,
 }
 
 impl Interpreter {
@@ -242,6 +245,7 @@ impl Interpreter {
             loop_signal: None,
             return_value: None,
             variant_constructors: HashSet::new(),
+            suppress_tool_log: options.suppress_tool_log,
         }
     }
 
@@ -2791,6 +2795,9 @@ impl Interpreter {
         output: JsonValue,
         duration_ms: i64,
     ) -> Result<(), RuntimeError> {
+        if self.suppress_tool_log {
+            return Ok(());
+        }
         self.seq += 1;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
