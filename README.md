@@ -40,22 +40,65 @@ I didn't write any of this. Hermes did. Over several sessions. Using GitHub Copi
 
 ---
 
-## Quick start
+## Installation
 
-You'll need Rust.
+You'll need [Rust](https://rustup.rs) (stable).
 
 ```bash
 git clone git@github.com:gabecorsini/lace-lang.git
 cd lace-lang
-cargo build --workspace
+cargo install --path crates/lace-cli
+```
 
+This installs the `lace` binary to `~/.cargo/bin/`. If that's not on your `$PATH` yet:
+
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Verify it worked:
+
+```bash
+lace --version
+```
+
+### Update
+
+Pull the latest and reinstall — `cargo install` overwrites the old binary:
+
+```bash
+git pull
+cargo install --path crates/lace-cli
+```
+
+### Uninstall
+
+```bash
+cargo uninstall lace-cli
+```
+
+---
+
+## Quick start
+
+```bash
 # Run a file
-./target/debug/lace run examples/phase15.lace
+lace run examples/weather.lace
 
 # Start a new project
-./target/debug/lace new myproject
+lace new myproject
 cd myproject
-../target/debug/lace run src/main.lace
+lace run src/main.lace
+
+# Type-check without running
+lace check src/main.lace
+
+# Compile to bytecode
+lace compile src/main.lace
+
+# Bundle into a standalone binary
+lace bundle src/main.lace
 ```
 
 ---
