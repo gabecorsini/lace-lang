@@ -1,0 +1,98 @@
+# Phase 10: user-defined record types + file I/O
+
+record Point {
+    x: Int,
+    y: Int,
+}
+
+record Response {
+    status: Int,
+    body: String,
+}
+
+fn make_point(x: Int, y: Int) -> Point [Pure] {
+    Point { x: x, y: y, }
+}
+
+fn response_ok(body: String) -> Response [Pure] {
+    Response { status: 200, body: body, }
+}
+
+@test
+fn test_record_field_access() -> Unit [Pure] {
+    let p = make_point(3, 7)
+    assert_eq(p.x, 3, "x field should be 3")
+    assert_eq(p.y, 7, "y field should be 7")
+}
+
+@test
+fn test_record_in_function_return() -> Unit [Pure] {
+    let resp = response_ok("hello")
+    assert_eq(resp.status, 200, "status should be 200")
+    assert_eq(resp.body, "hello", "body should match")
+}
+
+@test
+fn test_record_nested_fields() -> Unit [Pure] {
+    let p1 = Point { x: 10, y: 20, }
+    let sum = p1.x + p1.y
+    assert_eq(sum, 30, "x + y should be 30")
+}
+
+@test
+fn test_file_write_and_read() -> Unit [IO] {
+    let path = "/tmp/lace_phase10_test.txt"
+    let content = "hello from lace"
+    let write_result = File.write(path, content)
+    match write_result {
+        Ok(_) => {
+            let read_result = File.read(path)
+            match read_result {
+                Ok(data) => assert_eq(data, content, "read content should match written content"),
+                Err(e) => assert(false, "File.read failed: " ++ e),
+            }
+        },
+        Err(e) => assert(false, "File.write failed: " ++ e),
+    }
+}
+
+@test
+fn test_file_exists_after_write() -> Unit [IO] {
+    let path = "/tmp/lace_phase10_exists_test.txt"
+    let _ = File.write(path, "exists check")
+    assert(File.exists(path), "file should exist after write")
+}
+
+@test
+fn test_file_exists_false_for_missing() -> Unit [IO] {
+    let path = "/tmp/lace_phase10_no_such_file_xyz_999.txt"
+    assert(File.exists(path) == false, "non-existent file should return false")
+}
+
+@test
+fn test_file_read_err_on_missing() -> Unit [IO] {
+    let path = "/tmp/lace_phase10_missing_xyz_888.txt"
+    let result = File.read(path)
+    assert_err(result, "reading missing file should return Err")
+}
+
+fn main() -> Unit [IO] {
+    println("Phase 10: record types + file I/O")
+
+    let p = make_point(5, 12)
+    println("Point: x=" ++ to_string(p.x) ++ " y=" ++ to_string(p.y))
+
+    let resp = response_ok("OK body")
+    println("Response status: " ++ to_string(resp.status))
+    println("Response body:   " ++ resp.body)
+
+    match File.write("/tmp/lace_demo_output.txt", "written by lace phase10") {
+        Ok(_) => println("wrote file ok"),
+        Err(e) => println("write error: " ++ e),
+    }
+
+    match File.read("/tmp/lace_demo_output.txt") {
+        Ok(content) => println("read back: " ++ content),
+        Err(e) => println("read error: " ++ e),
+    }
+}

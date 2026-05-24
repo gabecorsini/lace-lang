@@ -608,7 +608,11 @@ impl<'a> Checker<'a> {
 
                 // User-defined function call
                 if let Some(callee) = self.fn_map.get(call.name.as_str()) {
-                    out = out.union(EffectSet::from_effect_exprs(&callee.effects));
+                    // [Pure] callee contributes no effects to caller — it means "no effects"
+                    let callee_effects = EffectSet::from_effect_exprs(&callee.effects);
+                    if !callee_effects.contains_tag(EffectTag::Pure) {
+                        out = out.union(callee_effects);
+                    }
                 } else if self.tool_names.contains(call.name.as_str()) {
                     // Calling tool declarations carries ToolCall (and therefore IO)
                     out.insert_tag(EffectTag::ToolCall);
@@ -636,6 +640,13 @@ impl<'a> Checker<'a> {
                 let mut out = self.infer_expr_effects(&call.target, fn_name, in_pure_block);
                 for a in &call.args {
                     out = out.union(self.infer_expr_effects(a, fn_name, in_pure_block));
+                }
+                // Check for module-qualified stdlib calls (e.g. File.read, List.map)
+                if let Expr::Ident(module_name, _) = call.target.as_ref() {
+                    let qualified = format!("{}.{}", module_name, call.method);
+                    if let Some(std_eff) = stdlib_effect_for_name(&qualified) {
+                        out.insert_tag(std_eff);
+                    }
                 }
                 out
             }
@@ -678,7 +689,8 @@ fn stdlib_effect_for_name(name: &str) -> Option<EffectTag> {
     match name {
         "read_file" | "write_file" | "append_file" | "file_exists" | "delete_file" | "list_dir"
         | "env_var" | "env_var_required" | "sleep" | "print" | "println" | "read_line"
-        | "context_remaining" | "context_used" | "context_assert" => Some(EffectTag::Io),
+        | "context_remaining" | "context_used" | "context_assert"
+        | "File.read" | "File.write" | "File.exists" => Some(EffectTag::Io),
         "now_unix" | "now_millis" => Some(EffectTag::Time),
         "random_float" | "random_int" => Some(EffectTag::Rand),
         "to_string"

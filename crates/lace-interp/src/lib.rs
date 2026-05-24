@@ -229,6 +229,7 @@ impl Interpreter {
     pub fn run_program(mut self, program: &Program) -> Result<Value, RuntimeError> {
         // Register module name bindings so Lace code can do List.range(...), etc.
         self.env.define("List".into(), Value::String("List".into()));
+        self.env.define("File".into(), Value::String("File".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -262,6 +263,7 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         // Register module name bindings so Lace code can do List.range(...), etc.
         self.env.define("List".into(), Value::String("List".into()));
+        self.env.define("File".into(), Value::String("File".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -1102,6 +1104,63 @@ impl Interpreter {
                 let v = args.first().cloned().unwrap_or(Value::Unit);
                 Ok(Some(Value::Variant { name: "Some".into(), payload: vec![v] }))
             }
+            // File I/O stdlib
+            "File.read" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::read_to_string(path) {
+                        Ok(content) => {
+                            self.log_effect("File.read", "IO", json!([path]), json!(content), 0)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::String(content)],
+                            }))
+                        }
+                        Err(e) => Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(e.to_string())],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "File.read expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "File.write" => match (args.first(), args.get(1)) {
+                (Some(Value::String(path)), Some(Value::String(content))) => {
+                    match fs::write(path, content) {
+                        Ok(()) => {
+                            self.log_effect("File.write", "IO", json!([path]), json!(null), 0)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::Unit],
+                            }))
+                        }
+                        Err(e) => Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(e.to_string())],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "File.write expects (String, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "File.exists" => match args.first() {
+                Some(Value::String(path)) => {
+                    let exists = Path::new(path).exists();
+                    self.log_effect("File.exists", "IO", json!([path]), json!(exists), 0)?;
+                    Ok(Some(Value::Bool(exists)))
+                }
+                _ => Err(RuntimeError {
+                    message: "File.exists expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
             "None" => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
             _ => Ok(None),
         }

@@ -101,6 +101,7 @@ impl Checker {
     fn install_prelude(&mut self) {
         // Register module names as dynamic values so FieldAccess type-checks pass
         self.scopes[0].vars.insert("List".into(), Type::Dynamic);
+        self.scopes[0].vars.insert("File".into(), Type::Dynamic);
 
         self.fn_sigs
             .insert("print".into(), (vec![Type::String], Type::Unit));
@@ -159,6 +160,19 @@ impl Checker {
             .insert("Some".into(), (vec![Type::Dynamic], Type::Dynamic));
         self.fn_sigs
             .insert("None".into(), (vec![], Type::Dynamic));
+        // File I/O stdlib
+        self.fn_sigs.insert(
+            "File.read".into(),
+            (vec![Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "File.write".into(),
+            (vec![Type::String, Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "File.exists".into(),
+            (vec![Type::String], Type::Bool),
+        );
     }
 
     fn collect_signatures(&mut self, program: &Program) {
@@ -506,6 +520,14 @@ impl Checker {
                 span,
             } => match self.infer_expr(target) {
                 Type::Record(_, fields) => fields.get(field).cloned().unwrap_or(Type::Unknown),
+                // Named user-defined record: look up the record type by name
+                Type::Named(rec_name, _) => {
+                    if let Some(fields) = self.record_types.get(&rec_name).cloned() {
+                        fields.get(field).cloned().unwrap_or(Type::Unknown)
+                    } else {
+                        Type::Dynamic
+                    }
+                }
                 // Module access (e.g. List.range) or dynamic value - return Dynamic
                 Type::Dynamic | Type::Unknown | Type::String => {
                     let _ = (field, span);
@@ -822,6 +844,12 @@ impl Checker {
         if *a == Type::Unknown || *b == Type::Unknown || *a == Type::Dynamic || *b == Type::Dynamic
         {
             return true;
+        }
+        // Named("Foo",[]) is compatible with Record("Foo",{...}) and vice versa
+        match (a, b) {
+            (Type::Named(na, args_a), Type::Record(nb, _)) if na == nb && args_a.is_empty() => return true,
+            (Type::Record(na, _), Type::Named(nb, args_b)) if na == nb && args_b.is_empty() => return true,
+            _ => {}
         }
         a == b
     }

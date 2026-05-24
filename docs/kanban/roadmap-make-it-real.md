@@ -5,19 +5,22 @@ Not production-ready, but *credibly good*. Docs, ergonomics, error messages, std
 
 ---
 
-## Phase 9 (in progress)
+## Phase 9 ✓ (done)
 - String stdlib (split, contains, trim, len, to_upper, to_lower, starts_with, ends_with)
 - Full arithmetic (+, -, *, /, %, //)
 - ? error propagation
 
 ---
 
-## Phase 10 — User-defined types + file I/O
+## Phase 10 ✓ (done)
 - `record` types: `record Response { status: Int, body: String }`
 - Field access: `resp.status`
 - File I/O stdlib: `File.read(path)`, `File.write(path, content)`, `File.exists(path)`
 - `Result<T,E>` constructors: `Ok(v)`, `Err(e)` usable in user code
-- Update examples and tests
+- Fixed type checker: `Named` ↔ `Record` compatibility + `FieldAccess` on named types
+- Fixed effect checker: calling `[Pure]` functions no longer leaks Pure into caller's required effects
+- Fixed effect checker: method-style module calls (e.g. `File.read`) now infer IO correctly
+- Updated examples and tests
 
 ---
 
