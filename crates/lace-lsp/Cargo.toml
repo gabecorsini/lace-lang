@@ -1,0 +1,26 @@
+[package]
+name = "lace-lsp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "LSP server for the Lace programming language"
+
+[[bin]]
+name = "lace-lsp"
+path = "src/main.rs"
+
+[lib]
+name = "lace_lsp"
+path = "src/lib.rs"
+
+[dependencies]
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+serde_json = { workspace = true }
+lace-parser = { path = "../lace-parser" }
+lace-types = { path = "../lace-types" }
+lace-ast = { path = "../lace-ast" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

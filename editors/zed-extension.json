@@ -1,0 +1,43 @@
+// Zed editor extension snippet for the Lace programming language.
+//
+// To use:
+//   1. Create a Zed extension directory: ~/.config/zed/extensions/lace/
+//   2. Copy this file there as extension.json
+//   3. Make sure `lace` binary is on PATH
+//
+// Zed will auto-detect the extension and start `lace lsp` when a *.lace file is opened.
+
+{
+  "name": "Lace",
+  "version": "0.1.0",
+  "description": "Lace programming language support for Zed",
+  "authors": ["Gabe Corsini"],
+  "repository": "https://github.com/gcorsini/lace",
+
+  "languages": [
+    {
+      "name": "Lace",
+      "grammar": "lace",
+      "path_suffixes": ["lace"],
+      "line_comments": ["// "],
+      "block_comment": ["/*", "*/"],
+      "brackets": [
+        { "start": "{", "end": "}", "close": true, "newline": true },
+        { "start": "[", "end": "]", "close": true, "newline": false },
+        { "start": "(", "end": ")", "close": true, "newline": false }
+      ],
+      "indent_on_line_ends_with": ["{"],
+      "decrease_indent_pattern": "^\\s*}"
+    }
+  ],
+
+  "language_servers": [
+    {
+      "name": "lace-lsp",
+      "language": "Lace",
+      "command": "lace",
+      "args": ["lsp"],
+      "initialization_options": {}
+    }
+  ]
+}

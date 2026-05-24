@@ -23,3 +23,5 @@ lace-effects = { path = "../lace-effects" }
 lace-interp = { path = "../lace-interp" }
 lace-ast = { path = "../lace-ast" }
 rustyline.workspace = true
+lace-lsp = { path = "../lace-lsp" }
+tokio = { version = "1", features = ["rt"] }

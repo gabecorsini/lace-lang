@@ -1,0 +1,21 @@
+# Helix editor configuration for the Lace programming language
+#
+# Add this to your ~/.config/helix/languages.toml
+# (or merge it into an existing languages.toml)
+#
+# Prerequisites:
+#   - `lace` binary must be on PATH (cargo install --path crates/lace-cli)
+
+[[language]]
+name = "lace"
+scope = "source.lace"
+injection-regex = "lace"
+file-types = ["lace"]
+comment-token = "//"
+indent = { tab-width = 2, unit = "  " }
+language-servers = ["lace-lsp"]
+roots = ["lace.toml"]
+
+[language-server.lace-lsp]
+command = "lace"
+args = ["lsp"]

@@ -8,6 +8,7 @@ members = [
     "crates/lace-interp",
     "crates/lace-stdlib",
     "crates/lace-cli",
+    "crates/lace-lsp",
 ]
 resolver = "2"
 

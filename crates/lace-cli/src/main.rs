@@ -127,6 +127,10 @@ enum Commands {
     },
     /// Version and build information
     Version,
+    /// Start the Lace Language Server (LSP) over stdio
+    ///
+    /// Configure your editor to invoke `lace lsp` as the language server command.
+    Lsp,
 }
 
 fn main() {
@@ -312,6 +316,11 @@ fn run() -> Result<()> {
         }
         Commands::Version => {
             print_version();
+        }
+        Commands::Lsp => {
+            tokio::runtime::Runtime::new()
+                .expect("failed to create tokio runtime")
+                .block_on(lace_lsp::run_server());
         }
     }
 
