@@ -1,0 +1,11 @@
+[package]
+name = "lace-vm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lace-ast = { path = "../lace-ast" }
+lace-parser = { path = "../lace-parser" }
+lace-interp = { path = "../lace-interp" }
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
