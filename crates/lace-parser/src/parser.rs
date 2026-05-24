@@ -176,6 +176,19 @@ impl Parser {
             TokenKind::Type => self.parse_type_alias().map(TopLevelItem::TypeAlias),
             TokenKind::Const => self.parse_const_decl().map(TopLevelItem::Const),
             TokenKind::Extern => self.parse_extern_decl().map(TopLevelItem::Extern),
+            // Allow top-level statements (let, mut let, for, while, expr-statements)
+            TokenKind::Let
+            | TokenKind::Mut
+            | TokenKind::For
+            | TokenKind::While
+            | TokenKind::Match
+            | TokenKind::If
+            | TokenKind::Return
+            | TokenKind::Ident(_) => {
+                // drop doc/ann for statements (they have no use)
+                let _ = (doc, ann);
+                self.parse_stmt().map(TopLevelItem::Statement)
+            }
             _ => {
                 self.error_here("expected top-level item");
                 None
@@ -342,6 +355,11 @@ impl Parser {
             params,
             ret_ty,
             options,
+            body: if self.at(&TokenKind::LBrace) {
+                self.parse_block()
+            } else {
+                None
+            },
             span: Span {
                 start,
                 end: self.prev_span().end,
@@ -1559,12 +1577,11 @@ impl Parser {
         let name = self.expect_type_ident()?;
         if self.match_tok(&TokenKind::LBrace) {
             let mut fields = Vec::new();
-            while !self.at(&TokenKind::RBrace) {
+            while !self.at(&TokenKind::RBrace) && !self.at(&TokenKind::Eof) {
                 let fstart = self.curr_span().start;
                 let fname = self.expect_ident()?;
                 self.expect(TokenKind::Colon)?;
                 let val = self.parse_expr()?;
-                self.expect(TokenKind::Comma)?;
                 fields.push((
                     fname,
                     val,
@@ -1573,6 +1590,9 @@ impl Parser {
                         end: self.prev_span().end,
                     },
                 ));
+                if !self.match_tok(&TokenKind::Comma) {
+                    break;
+                }
             }
             self.expect(TokenKind::RBrace)?;
             return Some(Expr::RecordLiteral(RecordLiteralExpr {

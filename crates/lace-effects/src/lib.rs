@@ -692,7 +692,9 @@ fn stdlib_effect_for_name(name: &str) -> Option<EffectTag> {
         "read_file" | "write_file" | "append_file" | "file_exists" | "delete_file" | "list_dir"
         | "env_var" | "env_var_required" | "sleep" | "print" | "println" | "read_line"
         | "context_remaining" | "context_used" | "context_assert"
-        | "File.read" | "File.write" | "File.exists" => Some(EffectTag::Io),
+        | "File.read" | "File.write" | "File.exists"
+        | "Http.get" | "Http.post" | "Http.post_json"
+        | "Env.get" | "Env.set" => Some(EffectTag::Io),
         "now_unix" | "now_millis" => Some(EffectTag::Time),
         "random_float" | "random_int" => Some(EffectTag::Rand),
         "to_string"

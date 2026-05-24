@@ -1,0 +1,66 @@
+fn main() -> Unit [IO] {
+    let url = "https://api.open-meteo.com/v1/forecast?latitude=39.0639&longitude=-108.5506&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max&temperature_unit=fahrenheit&timezone=America%2FDenver&forecast_days=1"
+
+    match Http.get(url) {
+        Ok(body) => {
+            match Json.parse(body) {
+                Ok(json) => {
+                    match Json.get(json, "daily") {
+                        Some(daily) => {
+                            let max_temp = match Json.get(daily, "temperature_2m_max") {
+                                Some(list) => match Json.index(list, 0) {
+                                    Some(v) => to_string(v),
+                                    None => "N/A",
+                                },
+                                None => "N/A",
+                            }
+                            let min_temp = match Json.get(daily, "temperature_2m_min") {
+                                Some(list) => match Json.index(list, 0) {
+                                    Some(v) => to_string(v),
+                                    None => "N/A",
+                                },
+                                None => "N/A",
+                            }
+                            let wcode = match Json.get(daily, "weathercode") {
+                                Some(list) => match Json.index(list, 0) {
+                                    Some(v) => to_string(v),
+                                    None => "N/A",
+                                },
+                                None => "N/A",
+                            }
+                            let precip = match Json.get(daily, "precipitation_sum") {
+                                Some(list) => match Json.index(list, 0) {
+                                    Some(v) => to_string(v),
+                                    None => "N/A",
+                                },
+                                None => "N/A",
+                            }
+                            let wind = match Json.get(daily, "windspeed_10m_max") {
+                                Some(list) => match Json.index(list, 0) {
+                                    Some(v) => to_string(v),
+                                    None => "N/A",
+                                },
+                                None => "N/A",
+                            }
+                            println("Grand Junction, CO Forecast:")
+                            println("  Weather code:   " ++ wcode)
+                            println("  High temp (F):  " ++ max_temp)
+                            println("  Low temp (F):   " ++ min_temp)
+                            println("  Precipitation:  " ++ precip ++ " mm")
+                            println("  Max wind (mph): " ++ wind)
+                        },
+                        None => {
+                            println("Error: no 'daily' key in response")
+                        },
+                    }
+                },
+                Err(e) => {
+                    println("JSON parse error: " ++ e)
+                },
+            }
+        },
+        Err(e) => {
+            println("HTTP error: " ++ e)
+        },
+    }
+}

@@ -42,6 +42,7 @@ pub enum TopLevelItem {
     TypeAlias(TypeAliasDecl),
     Const(ConstDecl),
     Extern(ExternDecl),
+    Statement(Stmt),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +102,7 @@ pub struct ToolDecl {
     pub params: Vec<ToolParam>,
     pub ret_ty: TypeExpr,
     pub options: Vec<ToolOption>,
+    pub body: Option<Block>,
     pub span: Span,
 }
 
@@ -607,6 +609,7 @@ pub fn walk_top_level_item<V: Visitor + ?Sized>(v: &mut V, item: &TopLevelItem) 
             }
             v.visit_type_expr(&ex.ret_ty);
         }
+        TopLevelItem::Statement(s) => v.visit_stmt(s),
     }
 }
 

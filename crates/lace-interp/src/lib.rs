@@ -275,6 +275,13 @@ impl Interpreter {
         }
 
         // run main if present; otherwise Unit
+        // run top-level statements
+        for item in &program.items {
+            if let TopLevelItem::Statement(stmt) = item {
+                self.eval_stmt(stmt)?;
+            }
+        }
+
         let out = if self.functions.contains_key("main") {
             self.call_function("main", vec![], Span::default())
         } else {
@@ -1804,6 +1811,17 @@ impl Interpreter {
                     propagated_err: None,
                 }),
             },
+            "Json.index" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(i))) => {
+                    let idx = *i as usize;
+                    Ok(Some(if idx < items.len() {
+                        Value::Variant { name: "Some".into(), payload: vec![items[idx].clone()] }
+                    } else {
+                        Value::Variant { name: "None".into(), payload: vec![] }
+                    }))
+                },
+                _ => Err(RuntimeError { message: "Json.index expects (List, Int)".into(), span: None, propagated_err: None })
+            },
             // Env stdlib
             "Env.get" => match args.first() {
                 Some(Value::String(key)) => {
@@ -2412,6 +2430,7 @@ impl Interpreter {
                     propagated_err: None,
                 }),
             },
+            "to_string" => Ok(Value::String(display_value(&target))),
             _ => Err(RuntimeError {
                 message: format!("unsupported method '{}'", method),
                 span: Some(span),
@@ -2737,6 +2756,7 @@ impl Interpreter {
         }
 
         let placeholder = placeholder_for_type(&tool.decl.ret_ty);
+        eprintln!("[lace] W: tool '{}' has no dispatch annotation (@http/@shell/mock) — returning stub", tool_name);
         self.log_effect(
             tool_name,
             effect_tag,
