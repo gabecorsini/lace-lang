@@ -252,6 +252,7 @@ impl<'a> Lexer<'a> {
         let kind = match s.as_str() {
             "module" => TokenKind::Module,
             "use" => TokenKind::Use,
+            "import" => TokenKind::Import,
             "fn" => TokenKind::Fn,
             "tool" => TokenKind::Tool,
             "record" => TokenKind::Record,

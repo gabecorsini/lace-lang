@@ -45,6 +45,7 @@ impl Parser {
     fn parse_program(&mut self) -> Option<Program> {
         let mut module = None;
         let mut uses = Vec::new();
+        let mut imports = Vec::new();
         let mut items = Vec::new();
 
         if self.at(&TokenKind::Module) {
@@ -54,6 +55,14 @@ impl Parser {
         while self.at(&TokenKind::Use) {
             if let Some(u) = self.parse_use_decl() {
                 uses.push(u);
+            } else {
+                self.synchronize_top_level();
+            }
+        }
+
+        while self.at(&TokenKind::Import) {
+            if let Some(i) = self.parse_import_decl() {
+                imports.push(i);
             } else {
                 self.synchronize_top_level();
             }
@@ -74,6 +83,7 @@ impl Parser {
             Some(Program {
                 module,
                 uses,
+                imports,
                 items,
             })
         } else {
@@ -116,6 +126,16 @@ impl Parser {
         Some(UseDecl {
             path,
             imports,
+            span: Span { start, end },
+        })
+    }
+
+    fn parse_import_decl(&mut self) -> Option<ImportDecl> {
+        let start = self.expect(TokenKind::Import)?.span.start;
+        let path = self.parse_module_path()?;
+        let end = self.prev_span().end;
+        Some(ImportDecl {
+            path,
             span: Span { start, end },
         })
     }
@@ -1561,6 +1581,7 @@ impl Parser {
             (expected, self.peek_kind_ref()),
             (Module, Module)
                 | (Use, Use)
+                | (Import, Import)
                 | (Fn, Fn)
                 | (Tool, Tool)
                 | (Record, Record)
@@ -1676,6 +1697,7 @@ impl Parser {
                     | TokenKind::Const
                     | TokenKind::Extern
                     | TokenKind::Use
+                    | TokenKind::Import
                     | TokenKind::Module
             ) {
                 return;

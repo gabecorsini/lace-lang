@@ -417,6 +417,7 @@ name = "lace-interp"
 version = "0.1.0"
 dependencies = [
  "lace-ast",
+ "lace-parser",
  "serde",
  "serde_json",
  "ureq",

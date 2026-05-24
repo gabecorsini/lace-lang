@@ -1,0 +1,8 @@
+import greetings
+
+fn main() [IO] {
+    let msg = greetings.hello("World")
+    println(msg)
+    let bye = greetings.farewell("World")
+    println(bye)
+}

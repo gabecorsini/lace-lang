@@ -1,0 +1,9 @@
+module greetings
+
+fn hello(name: String) -> String [Pure] {
+    "Hello, " ++ name ++ "!"
+}
+
+fn farewell(name: String) -> String [Pure] {
+    "Goodbye, " ++ name ++ "."
+}

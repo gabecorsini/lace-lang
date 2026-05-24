@@ -10,6 +10,7 @@ pub struct Span {
 pub struct Program {
     pub module: Option<ModuleDecl>,
     pub uses: Vec<UseDecl>,
+    pub imports: Vec<ImportDecl>,
     pub items: Vec<TopLevelItem>,
 }
 
@@ -23,6 +24,12 @@ pub struct ModuleDecl {
 pub struct UseDecl {
     pub path: Vec<String>,
     pub imports: Option<Vec<String>>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportDecl {
+    pub path: Vec<String>,
     pub span: Span,
 }
 

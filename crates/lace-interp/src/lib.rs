@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -38,6 +39,7 @@ pub struct RuntimeError {
 pub struct RunOptions {
     pub checkpoint_path: Option<String>,
     pub replay_mode: bool,
+    pub source_path: Option<String>,
 }
 
 impl Default for RunOptions {
@@ -45,6 +47,7 @@ impl Default for RunOptions {
         Self {
             checkpoint_path: None,
             replay_mode: false,
+            source_path: None,
         }
     }
 }
@@ -84,6 +87,7 @@ struct FunctionDef {
     params: Vec<String>,
     effects: Vec<EffectExpr>,
     body: Block,
+    qualified_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -152,12 +156,15 @@ pub struct Interpreter {
     run_id: String,
     seq: u64,
     module_name: String,
+    current_dir: Option<PathBuf>,
     journal_path: String,
     checkpoint_path: Option<String>,
     replay: Option<ReplayCursor>,
     env: Env,
     functions: HashMap<String, FunctionDef>,
     tools: HashMap<String, ToolDef>,
+    module_members: HashMap<String, HashSet<String>>,
+    loaded_modules: HashSet<String>,
     call_stack: Vec<CallFrame>,
 }
 
@@ -195,6 +202,11 @@ impl Interpreter {
             run_id,
             seq: 0,
             module_name: module_name.unwrap_or_else(|| "main".into()),
+            current_dir: options
+                .source_path
+                .as_ref()
+                .map(PathBuf::from)
+                .and_then(|p| p.parent().map(Path::to_path_buf)),
             journal_path: options
                 .checkpoint_path
                 .as_ref()
@@ -205,11 +217,17 @@ impl Interpreter {
             env: Env::new(),
             functions: HashMap::new(),
             tools: HashMap::new(),
+            module_members: HashMap::new(),
+            loaded_modules: HashSet::new(),
             call_stack: Vec::new(),
         }
     }
 
     pub fn run_program(mut self, program: &Program) -> Result<Value, RuntimeError> {
+        // Register module name bindings so Lace code can do List.range(...), etc.
+        self.env.define("List".into(), Value::String("List".into()));
+
+        self.load_imports(program)?;
         self.register_items(program);
 
         // execute top-level consts as bindings
@@ -239,25 +257,120 @@ impl Interpreter {
             self.module_name = module.path.join(".");
         }
 
+        let mut exported = self
+            .module_members
+            .remove(&self.module_name)
+            .unwrap_or_default();
+
         for item in &program.items {
             match item {
                 TopLevelItem::Function(f) => {
-                    self.functions.insert(
-                        f.name.clone(),
-                        FunctionDef {
-                            params: f.params.iter().map(|p| p.name.clone()).collect(),
-                            effects: f.effects.clone(),
-                            body: f.body.clone(),
-                        },
-                    );
+                    let qualified_name = format!("{}.{}", self.module_name, f.name);
+                    let def = FunctionDef {
+                        params: f.params.iter().map(|p| p.name.clone()).collect(),
+                        effects: f.effects.clone(),
+                        body: f.body.clone(),
+                        qualified_name: qualified_name.clone(),
+                    };
+                    self.functions.insert(qualified_name.clone(), def.clone());
+                    if self.module_name == "main" {
+                        self.functions.insert(f.name.clone(), def);
+                    }
+                    exported.insert(f.name.clone());
                 }
                 TopLevelItem::Tool(t) => {
                     self.tools
                         .insert(t.name.clone(), ToolDef { decl: t.clone() });
+                    exported.insert(t.name.clone());
                 }
                 _ => {}
             }
         }
+
+        self.module_members
+            .insert(self.module_name.clone(), exported);
+    }
+
+    fn load_imports(&mut self, program: &Program) -> Result<(), RuntimeError> {
+        let Some(base_dir) = self.current_dir.clone() else {
+            return Ok(());
+        };
+
+        for import in &program.imports {
+            self.load_module_from_import(&base_dir, import)?;
+            // Bind the last path segment as a module-ref value so Lace code can do module.fn(...)
+            if let Some(name) = import.path.last() {
+                let module_name = import.path.join(".");
+                self.env.define(name.clone(), Value::String(module_name));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_module_from_import(
+        &mut self,
+        base_dir: &Path,
+        import: &ImportDecl,
+    ) -> Result<(), RuntimeError> {
+        let module_name = import.path.join(".");
+        if self.loaded_modules.contains(&module_name) {
+            return Ok(());
+        }
+
+        let mut module_path = base_dir.to_path_buf();
+        for part in &import.path {
+            module_path.push(part);
+        }
+        module_path.set_extension("lace");
+
+        let source = fs::read_to_string(&module_path).map_err(|e| RuntimeError {
+            message: format!(
+                "failed to import module '{}' from '{}': {e}",
+                module_name,
+                module_path.display()
+            ),
+            span: Some(import.span),
+        })?;
+
+        let (parsed, parse_errors) = lace_parser::parse_program(&source);
+        if !parse_errors.is_empty() {
+            let joined = parse_errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RuntimeError {
+                message: format!(
+                    "failed to parse imported module '{}': {}",
+                    module_name, joined
+                ),
+                span: Some(import.span),
+            });
+        }
+
+        let program = parsed.ok_or_else(|| RuntimeError {
+            message: format!("failed to parse imported module '{}'", module_name),
+            span: Some(import.span),
+        })?;
+
+        if self.loaded_modules.contains(&module_name) {
+            return Ok(());
+        }
+        self.loaded_modules.insert(module_name.clone());
+
+        let prev_module = self.module_name.clone();
+        let prev_dir = self.current_dir.clone();
+        self.module_name = module_name;
+        self.current_dir = module_path.parent().map(Path::to_path_buf);
+
+        self.load_imports(&program)?;
+        self.register_items(&program);
+
+        self.current_dir = prev_dir;
+        self.module_name = prev_module;
+
+        Ok(())
     }
 
     fn eval_block(&mut self, block: &Block) -> Result<EvalFlow, RuntimeError> {
@@ -366,10 +479,19 @@ impl Interpreter {
                 Literal::String(v) => Value::String(v.clone()),
                 Literal::Bool(v) => Value::Bool(*v),
             }),
-            Expr::Ident(name, span) => self.env.get(name).ok_or_else(|| RuntimeError {
-                message: format!("unknown identifier '{}'", name),
-                span: Some(*span),
-            }),
+            Expr::Ident(name, span) => {
+                if let Some(v) = self.env.get(name) {
+                    Ok(v)
+                } else if self.functions.contains_key(name.as_str()) {
+                    // Allow bare function names to be used as first-class references
+                    Ok(Value::String(name.clone()))
+                } else {
+                    Err(RuntimeError {
+                        message: format!("unknown identifier '{}'", name),
+                        span: Some(*span),
+                    })
+                }
+            }
             Expr::Block(b) => match self.eval_block(b)? {
                 EvalFlow::Value(v) => Ok(v),
                 EvalFlow::Return(v) => Ok(v),
@@ -417,6 +539,20 @@ impl Interpreter {
                     .iter()
                     .map(|a| self.eval_expr(a))
                     .collect::<Result<Vec<_>, _>>()?;
+
+                if let Some(Value::String(fn_name)) = args.first() {
+                    if self.functions.contains_key(fn_name)
+                        && (call.name == "List.map" || call.name == "List.filter")
+                    {
+                        return self
+                            .call_builtin(&call.name, &args)?
+                            .ok_or_else(|| RuntimeError {
+                                message: format!("unknown function '{}'", call.name),
+                                span: Some(call.span),
+                            });
+                    }
+                }
+
                 self.call_function(&call.name, args, call.span)
             }
             Expr::MethodCall(call) => {
@@ -440,6 +576,20 @@ impl Interpreter {
                             message: format!("missing field '{}'", field),
                             span: Some(*span),
                         })
+                    }
+                    Value::String(module_name) => {
+                        let fn_name = format!("{}.{}", module_name, field);
+                        if self.functions.contains_key(&fn_name) {
+                            Ok(Value::String(fn_name))
+                        } else {
+                            Err(RuntimeError {
+                                message: format!(
+                                    "module '{}' has no exported function '{}'",
+                                    module_name, field
+                                ),
+                                span: Some(*span),
+                            })
+                        }
                     }
                     _ => Err(RuntimeError {
                         message: "field access on non-record value".into(),
@@ -596,12 +746,21 @@ impl Interpreter {
             return self.call_tool(name, args, span);
         }
 
-        let Some(f) = self.functions.get(name).cloned() else {
-            return Err(RuntimeError {
+        let resolved_name = self
+            .resolve_function_name(name)
+            .ok_or_else(|| RuntimeError {
                 message: format!("unknown function '{}'", name),
                 span: Some(span),
-            });
-        };
+            })?;
+
+        let f = self
+            .functions
+            .get(&resolved_name)
+            .cloned()
+            .ok_or_else(|| RuntimeError {
+                message: format!("unknown function '{}'", name),
+                span: Some(span),
+            })?;
 
         if f.params.len() != args.len() {
             return Err(RuntimeError {
@@ -633,6 +792,25 @@ impl Interpreter {
         };
 
         Ok(out)
+    }
+
+    fn resolve_function_name(&self, name: &str) -> Option<String> {
+        if self.functions.contains_key(name) {
+            return Some(name.to_string());
+        }
+
+        let qualified = format!("{}.{}", self.module_name, name);
+        if self.functions.contains_key(&qualified) {
+            return Some(qualified);
+        }
+
+        for def in self.functions.values() {
+            if def.qualified_name == name {
+                return Some(name.to_string());
+            }
+        }
+
+        None
     }
 
     fn call_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, RuntimeError> {
@@ -688,6 +866,64 @@ impl Interpreter {
                 self.log_effect(name, "Time", json!(args), json!(val), 0)?;
                 Ok(Some(Value::Int(val)))
             }
+            "to_string" => {
+                let out = args.first().map(display_value).unwrap_or_default();
+                Ok(Some(Value::String(out)))
+            }
+            "List.length" => match args.first() {
+                Some(Value::List(items)) => Ok(Some(Value::Int(items.len() as i64))),
+                _ => Err(RuntimeError {
+                    message: "List.length expects a list".into(),
+                    span: None,
+                }),
+            },
+            "List.range" => match (args.first(), args.get(1)) {
+                (Some(Value::Int(start)), Some(Value::Int(end))) => {
+                    let mut out = Vec::new();
+                    if start <= end {
+                        for i in *start..*end {
+                            out.push(Value::Int(i));
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.range expects (Int, Int)".into(),
+                    span: None,
+                }),
+            },
+            "List.map" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::String(fn_name))) => {
+                    let mut out = Vec::with_capacity(items.len());
+                    for item in items {
+                        let mapped =
+                            self.call_function(fn_name, vec![item.clone()], Span::default())?;
+                        out.push(mapped);
+                    }
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.map expects (List, fn_ref)".into(),
+                    span: None,
+                }),
+            },
+            "List.filter" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::String(fn_name))) => {
+                    let mut out = Vec::new();
+                    for item in items {
+                        let keep =
+                            self.call_function(fn_name, vec![item.clone()], Span::default())?;
+                        if as_bool(&keep) {
+                            out.push(item.clone());
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.filter expects (List, fn_ref)".into(),
+                    span: None,
+                }),
+            },
             _ => Ok(None),
         }
     }
@@ -699,6 +935,17 @@ impl Interpreter {
         args: Vec<Value>,
         span: Span,
     ) -> Result<Value, RuntimeError> {
+        // Module method dispatch: e.g. List.range(0, 10) where target is Value::String("List")
+        if let Value::String(module_name) = &target {
+            let qualified = format!("{}.{}", module_name, method);
+            if let Some(v) = self.call_builtin(&qualified, &args)? {
+                return Ok(v);
+            }
+            if self.functions.contains_key(&qualified) {
+                return self.call_function(&qualified, args, span);
+            }
+        }
+
         match method {
             // Option
             "unwrap_or" => match target {

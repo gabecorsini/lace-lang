@@ -66,6 +66,12 @@ struct Scope {
 
 pub fn check_program(program: &Program) -> Vec<TypeError> {
     let mut checker = Checker::new();
+    // Register imported module names as Dynamic so field access type-checks pass
+    for import in &program.imports {
+        if let Some(name) = import.path.last() {
+            checker.scopes[0].vars.insert(name.clone(), Type::Dynamic);
+        }
+    }
     checker.collect_signatures(program);
     checker.check(program);
     checker.errors
@@ -93,12 +99,45 @@ impl Checker {
     }
 
     fn install_prelude(&mut self) {
+        // Register module names as dynamic values so FieldAccess type-checks pass
+        self.scopes[0].vars.insert("List".into(), Type::Dynamic);
+
         self.fn_sigs
             .insert("print".into(), (vec![Type::String], Type::Unit));
         self.fn_sigs
             .insert("println".into(), (vec![Type::String], Type::Unit));
         self.fn_sigs
             .insert("type_of".into(), (vec![Type::Dynamic], Type::String));
+        self.fn_sigs
+            .insert("to_string".into(), (vec![Type::Dynamic], Type::String));
+        self.fn_sigs.insert(
+            "List.length".into(),
+            (vec![Type::List(Box::new(Type::Dynamic))], Type::Int),
+        );
+        self.fn_sigs.insert(
+            "List.range".into(),
+            (vec![Type::Int, Type::Int], Type::List(Box::new(Type::Int))),
+        );
+        self.fn_sigs.insert(
+            "List.map".into(),
+            (
+                vec![
+                    Type::List(Box::new(Type::Dynamic)),
+                    Type::Fn(vec![Type::Dynamic], Box::new(Type::Dynamic)),
+                ],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "List.filter".into(),
+            (
+                vec![
+                    Type::List(Box::new(Type::Dynamic)),
+                    Type::Fn(vec![Type::Dynamic], Box::new(Type::Bool)),
+                ],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
     }
 
     fn collect_signatures(&mut self, program: &Program) {
@@ -347,14 +386,22 @@ impl Checker {
                 Literal::String(_) => Type::String,
                 Literal::Bool(_) => Type::Bool,
             },
-            Expr::Ident(name, span) => self.lookup(name).unwrap_or_else(|| {
-                self.errors.push(TypeError::UnknownIdentifier {
-                    name: name.clone(),
-                    span_start: span.start,
-                    span_end: span.end,
-                });
-                Type::Unknown
-            }),
+            Expr::Ident(name, span) => {
+                if let Some(t) = self.lookup(name) {
+                    t
+                } else if self.fn_sigs.contains_key(name.as_str()) {
+                    // Bare function name used as a first-class reference
+                    let (params, ret) = self.fn_sigs[name.as_str()].clone();
+                    Type::Fn(params, Box::new(ret))
+                } else {
+                    self.errors.push(TypeError::UnknownIdentifier {
+                        name: name.clone(),
+                        span_start: span.start,
+                        span_end: span.end,
+                    });
+                    Type::Unknown
+                }
+            }
             Expr::Block(b) => {
                 self.push_scope();
                 for s in &b.stmts {
@@ -438,6 +485,11 @@ impl Checker {
                 span,
             } => match self.infer_expr(target) {
                 Type::Record(_, fields) => fields.get(field).cloned().unwrap_or(Type::Unknown),
+                // Module access (e.g. List.range) or dynamic value - return Dynamic
+                Type::Dynamic | Type::Unknown | Type::String => {
+                    let _ = (field, span);
+                    Type::Dynamic
+                }
                 _ => {
                     let found = self.infer_expr(target);
                     self.errors.push(TypeError::Mismatch {

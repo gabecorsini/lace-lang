@@ -64,6 +64,7 @@ fn run() -> Result<()> {
             let options = RunOptions {
                 checkpoint_path: checkpoint.map(|p| p.display().to_string()),
                 replay_mode: false,
+                source_path: Some(file.display().to_string()),
             };
 
             match run_with_options(&program, options) {
@@ -90,6 +91,7 @@ fn run() -> Result<()> {
             let options = RunOptions {
                 checkpoint_path: Some(checkpoint.display().to_string()),
                 replay_mode: true,
+                source_path: Some(file.display().to_string()),
             };
             match run_with_options(&program, options) {
                 Ok(value) => {
@@ -281,6 +283,7 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
     let mut default_options = RunOptions {
         checkpoint_path: checkpoint.map(|p| p.display().to_string()),
         replay_mode: false,
+        source_path: None,
     };
     if let Some(replay_path) = replay {
         default_options.checkpoint_path = Some(replay_path.display().to_string());

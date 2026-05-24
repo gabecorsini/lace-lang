@@ -1,0 +1,50 @@
+// loops.lace — demonstrates for/while loops and List stdlib
+
+fn double(x: Int) -> Int [Pure] {
+    x * 2
+}
+
+fn is_even(x: Int) -> Bool [Pure] {
+    x % 2 == 0
+}
+
+fn main() [IO] {
+    // for loop over a list literal
+    println("--- for loop ---")
+    for i in [1, 2, 3, 4, 5] {
+        println(to_string(i))
+    }
+
+    // while loop with counter
+    println("--- while loop ---")
+    mut let n = 0
+    while n < 3 {
+        println("n = " ++ to_string(n))
+        n = n + 1
+    }
+
+    // List.range and for loop
+    println("--- List.range ---")
+    let nums = List.range(0, 5)
+    for x in nums {
+        println(to_string(x))
+    }
+
+    // List.length
+    let length = List.length(nums)
+    println("length = " ++ to_string(length))
+
+    // List.map with function reference
+    println("--- List.map ---")
+    let doubled = List.map(nums, double)
+    for x in doubled {
+        println(to_string(x))
+    }
+
+    // List.filter with function reference
+    println("--- List.filter ---")
+    let evens = List.filter(nums, is_even)
+    for x in evens {
+        println(to_string(x))
+    }
+}
