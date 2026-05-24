@@ -27,6 +27,12 @@ pub enum Value {
         name: String,
         payload: Vec<Value>,
     },
+    Map(HashMap<String, Value>),
+    Closure {
+        params: Vec<String>,
+        body: Block,
+        captured_env: HashMap<String, Value>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -242,6 +248,7 @@ impl Interpreter {
         // Register module name bindings so Lace code can do List.range(...), etc.
         self.env.define("List".into(), Value::String("List".into()));
         self.env.define("File".into(), Value::String("File".into()));
+        self.env.define("Map".into(), Value::String("Map".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -276,6 +283,7 @@ impl Interpreter {
         // Register module name bindings so Lace code can do List.range(...), etc.
         self.env.define("List".into(), Value::String("List".into()));
         self.env.define("File".into(), Value::String("File".into()));
+        self.env.define("Map".into(), Value::String("Map".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -790,11 +798,20 @@ impl Interpreter {
                     UnaryOp::Not => Ok(Value::Bool(!as_bool(&v))),
                 }
             }
-            Expr::Closure(_) => Err(RuntimeError {
-                message: "closure runtime values are not implemented in Phase 2".into(),
-                span: Some(expr.span()),
-                propagated_err: None,
-            }),
+            Expr::Closure(c) => {
+                // Capture the entire current environment for lexical scoping
+                let captured_env: HashMap<String, Value> = self
+                    .env
+                    .scopes
+                    .iter()
+                    .flat_map(|scope| scope.iter().map(|(k, v)| (k.clone(), v.clone())))
+                    .collect();
+                Ok(Value::Closure {
+                    params: c.params.iter().map(|p| p.name.clone()).collect(),
+                    body: c.body.clone(),
+                    captured_env,
+                })
+            }
             Expr::RecordLiteral(r) => {
                 let mut fields = HashMap::new();
                 for (name, e, _) in &r.fields {
@@ -875,6 +892,11 @@ impl Interpreter {
             });
         }
 
+        // Check if the name resolves to a closure value in the environment
+        if let Some(Value::Closure { params, body, captured_env }) = self.env.get(name) {
+            return self.call_closure_value(params, body, captured_env, args, span);
+        }
+
         let resolved_name = self
             .resolve_function_name(name)
             .ok_or_else(|| RuntimeError {
@@ -934,6 +956,69 @@ impl Interpreter {
             EvalFlow::Return(v) => v,
         };
 
+        Ok(out)
+    }
+
+    /// Call a Value::Closure or Value::String (fn ref) with the given args.
+    fn call_callable(&mut self, callable: Value, args: Vec<Value>, span: Span) -> Result<Value, RuntimeError> {
+        match callable {
+            Value::String(fn_name) => self.call_function(&fn_name.clone(), args, span),
+            Value::Closure { params, body, captured_env } => {
+                self.call_closure_value(params, body, captured_env, args, span)
+            }
+            other => Err(RuntimeError {
+                message: format!("value is not callable: {}", display_value(&other)),
+                span: Some(span),
+                propagated_err: None,
+            }),
+        }
+    }
+
+    fn call_closure_value(
+        &mut self,
+        params: Vec<String>,
+        body: Block,
+        captured_env: HashMap<String, Value>,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, RuntimeError> {
+        if params.len() != args.len() {
+            return Err(RuntimeError {
+                message: format!(
+                    "closure expected {} argument(s), got {}",
+                    params.len(),
+                    args.len()
+                ),
+                span: Some(span),
+                propagated_err: None,
+            });
+        }
+        self.env.push();
+        // Inject captured variables
+        for (k, v) in &captured_env {
+            self.env.define(k.clone(), v.clone());
+        }
+        // Bind parameters (overrides captured vars with same name)
+        for (p, a) in params.iter().zip(args.into_iter()) {
+            self.env.define(p.clone(), a);
+        }
+        let eval_result = self.eval_block(&body);
+        self.env.pop();
+
+        let eval_result = match eval_result {
+            Err(RuntimeError { propagated_err: Some(err_val), .. }) => {
+                return Ok(Value::Variant {
+                    name: "Err".into(),
+                    payload: vec![err_val],
+                });
+            }
+            other => other,
+        };
+
+        let out = match eval_result? {
+            EvalFlow::Value(v) => self.return_value.take().unwrap_or(v),
+            EvalFlow::Return(v) => v,
+        };
         Ok(out)
     }
 
@@ -1135,36 +1220,301 @@ impl Interpreter {
                     propagated_err: None,
                 }),
             },
-            "List.map" => match (args.first(), args.get(1)) {
-                (Some(Value::List(items)), Some(Value::String(fn_name))) => {
+            "List.map" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    }),
+                };
+                if let Value::List(items) = list {
                     let mut out = Vec::with_capacity(items.len());
                     for item in items {
-                        let mapped =
-                            self.call_function(fn_name, vec![item.clone()], Span::default())?;
+                        let mapped = self.call_callable(callable.clone(), vec![item], Span::default())?;
                         out.push(mapped);
                     }
                     Ok(Some(Value::List(out)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    })
+                }
+            }
+            "List.filter" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.filter expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut out = Vec::new();
+                    for item in items {
+                        let keep = self.call_callable(callable.clone(), vec![item.clone()], Span::default())?;
+                        if as_bool(&keep) {
+                            out.push(item);
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.filter expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    })
+                }
+            }
+            "List.fold" => {
+                let (list, init, callable) = match (args.first(), args.get(1), args.get(2)) {
+                    (Some(l), Some(i), Some(c)) => (l.clone(), i.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.fold expects (List, init, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut acc = init;
+                    for item in items {
+                        acc = self.call_callable(callable.clone(), vec![acc, item], Span::default())?;
+                    }
+                    Ok(Some(acc))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.fold expects (List, init, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    })
+                }
+            }
+            "List.flat_map" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.flat_map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut out = Vec::new();
+                    for item in items {
+                        let mapped = self.call_callable(callable.clone(), vec![item], Span::default())?;
+                        if let Value::List(inner) = mapped {
+                            out.extend(inner);
+                        } else {
+                            out.push(mapped);
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.flat_map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                    })
+                }
+            }
+            "List.zip" => match (args.first(), args.get(1)) {
+                (Some(Value::List(left)), Some(Value::List(right))) => {
+                    let pairs = left.iter().zip(right.iter())
+                        .map(|(a, b)| Value::Tuple(vec![a.clone(), b.clone()]))
+                        .collect();
+                    Ok(Some(Value::List(pairs)))
                 }
                 _ => Err(RuntimeError {
-                    message: "List.map expects (List, fn_ref)".into(),
+                    message: "List.zip expects (List, List)".into(),
                     span: None,
                     propagated_err: None,
                 }),
             },
-            "List.filter" => match (args.first(), args.get(1)) {
-                (Some(Value::List(items)), Some(Value::String(fn_name))) => {
-                    let mut out = Vec::new();
-                    for item in items {
-                        let keep =
-                            self.call_function(fn_name, vec![item.clone()], Span::default())?;
-                        if as_bool(&keep) {
-                            out.push(item.clone());
-                        }
-                    }
-                    Ok(Some(Value::List(out)))
+            "List.sort" => match args.first() {
+                Some(Value::List(items)) => {
+                    let mut sorted = items.clone();
+                    sorted.sort_by(|a, b| cmp_values(a, b));
+                    Ok(Some(Value::List(sorted)))
                 }
                 _ => Err(RuntimeError {
-                    message: "List.filter expects (List, fn_ref)".into(),
+                    message: "List.sort expects a List".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "List.contains" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(val)) => {
+                    Ok(Some(Value::Bool(items.contains(val))))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.contains expects (List, value)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "List.sum" => match args.first() {
+                Some(Value::List(items)) => {
+                    let mut sum_i = 0i64;
+                    let mut sum_f = 0f64;
+                    let mut is_float = false;
+                    for v in items {
+                        match v {
+                            Value::Int(i) => sum_i += i,
+                            Value::Float(f) => { is_float = true; sum_f += f; }
+                            _ => return Err(RuntimeError {
+                                message: "List.sum requires a list of numbers".into(),
+                                span: None,
+                                propagated_err: None,
+                            }),
+                        }
+                    }
+                    if is_float {
+                        Ok(Some(Value::Float(sum_f + sum_i as f64)))
+                    } else {
+                        Ok(Some(Value::Int(sum_i)))
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "List.sum expects a List".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "List.min" => match args.first() {
+                Some(Value::List(items)) if !items.is_empty() => {
+                    let mut m = items[0].clone();
+                    for v in &items[1..] {
+                        if cmp_values(v, &m) == std::cmp::Ordering::Less {
+                            m = v.clone();
+                        }
+                    }
+                    Ok(Some(Value::Variant { name: "Some".into(), payload: vec![m] }))
+                }
+                Some(Value::List(_)) => {
+                    Ok(Some(Value::Variant { name: "None".into(), payload: vec![] }))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.min expects a List".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "List.max" => match args.first() {
+                Some(Value::List(items)) if !items.is_empty() => {
+                    let mut m = items[0].clone();
+                    for v in &items[1..] {
+                        if cmp_values(v, &m) == std::cmp::Ordering::Greater {
+                            m = v.clone();
+                        }
+                    }
+                    Ok(Some(Value::Variant { name: "Some".into(), payload: vec![m] }))
+                }
+                Some(Value::List(_)) => {
+                    Ok(Some(Value::Variant { name: "None".into(), payload: vec![] }))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.max expects a List".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            // Map stdlib
+            "Map.new" => Ok(Some(Value::Map(HashMap::new()))),
+            "Map.insert" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::Map(m)), Some(Value::String(key)), Some(val)) => {
+                    let mut new_map = m.clone();
+                    new_map.insert(key.clone(), val.clone());
+                    Ok(Some(Value::Map(new_map)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.insert expects (Map, String, value)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.get" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(m)), Some(Value::String(key))) => {
+                    Ok(Some(match m.get(key) {
+                        Some(v) => Value::Variant { name: "Some".into(), payload: vec![v.clone()] },
+                        None => Value::Variant { name: "None".into(), payload: vec![] },
+                    }))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.get expects (Map, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.remove" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(m)), Some(Value::String(key))) => {
+                    let mut new_map = m.clone();
+                    new_map.remove(key);
+                    Ok(Some(Value::Map(new_map)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.remove expects (Map, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.contains_key" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(m)), Some(Value::String(key))) => {
+                    Ok(Some(Value::Bool(m.contains_key(key))))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.contains_key expects (Map, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.keys" => match args.first() {
+                Some(Value::Map(m)) => {
+                    let mut keys: Vec<Value> = m.keys().map(|k| Value::String(k.clone())).collect();
+                    keys.sort_by(|a, b| cmp_values(a, b));
+                    Ok(Some(Value::List(keys)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.keys expects a Map".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.values" => match args.first() {
+                Some(Value::Map(m)) => {
+                    let mut pairs: Vec<(&String, &Value)> = m.iter().collect();
+                    pairs.sort_by_key(|(k, _)| k.as_str());
+                    let vals: Vec<Value> = pairs.into_iter().map(|(_, v)| v.clone()).collect();
+                    Ok(Some(Value::List(vals)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.values expects a Map".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.entries" => match args.first() {
+                Some(Value::Map(m)) => {
+                    let mut pairs: Vec<(&String, &Value)> = m.iter().collect();
+                    pairs.sort_by_key(|(k, _)| k.as_str());
+                    let entries: Vec<Value> = pairs.into_iter()
+                        .map(|(k, v)| Value::Tuple(vec![Value::String(k.clone()), v.clone()]))
+                        .collect();
+                    Ok(Some(Value::List(entries)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Map.entries expects a Map".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
+            "Map.length" => match args.first() {
+                Some(Value::Map(m)) => Ok(Some(Value::Int(m.len() as i64))),
+                _ => Err(RuntimeError {
+                    message: "Map.length expects a Map".into(),
                     span: None,
                     propagated_err: None,
                 }),
@@ -1263,7 +1613,15 @@ impl Interpreter {
         }
 
         match method {
-            // Option
+            // Option methods
+            "is_some" => match target {
+                Value::Variant { ref name, .. } => Ok(Value::Bool(name == "Some")),
+                _ => Ok(Value::Bool(false)),
+            },
+            "is_none" => match target {
+                Value::Variant { ref name, .. } => Ok(Value::Bool(name == "None")),
+                _ => Ok(Value::Bool(false)),
+            },
             "unwrap_or" => match target {
                 Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
                     Ok(payload[0].clone())
@@ -1277,76 +1635,105 @@ impl Interpreter {
                     propagated_err: None,
                 }),
             },
-            "map" => match target {
+            "unwrap" => match target {
                 Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Some".into(),
-                        payload,
-                    })
+                    Ok(payload[0].clone())
                 }
-                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
-                    Ok(Value::Variant {
-                        name: "None".into(),
-                        payload: vec![],
-                    })
+                Value::Variant { name, payload } if name == "Confident" && payload.len() == 1 => {
+                    Ok(payload[0].clone())
                 }
-                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Ok".into(),
-                        payload,
-                    })
-                }
-                Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Err".into(),
-                        payload,
-                    })
-                }
-                Value::List(items) => Ok(Value::List(items)),
+                Value::Variant { name, .. } if name == "None" => Err(RuntimeError {
+                    message: "unwrap called on None".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
                 _ => Err(RuntimeError {
-                    message: "map expects Option/Result/List value".into(),
+                    message: "unwrap expects Some(_) or Confident(_)".into(),
                     span: Some(span),
                     propagated_err: None,
                 }),
             },
-            "and_then" => match target {
-                Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Some".into(),
-                        payload,
-                    })
+            "map" => {
+                let callable = args.first().cloned();
+                match target {
+                    Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            let mapped = self.call_callable(f, vec![payload[0].clone()], span)?;
+                            Ok(Value::Variant { name: "Some".into(), payload: vec![mapped] })
+                        } else {
+                            Ok(Value::Variant { name: "Some".into(), payload })
+                        }
+                    }
+                    Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    }
+                    Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            let mapped = self.call_callable(f, vec![payload[0].clone()], span)?;
+                            Ok(Value::Variant { name: "Ok".into(), payload: vec![mapped] })
+                        } else {
+                            Ok(Value::Variant { name: "Ok".into(), payload })
+                        }
+                    }
+                    Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                        Ok(Value::Variant { name: "Err".into(), payload })
+                    }
+                    Value::List(items) => {
+                        if let Some(f) = callable {
+                            let mut out = Vec::with_capacity(items.len());
+                            for item in items {
+                                let mapped = self.call_callable(f.clone(), vec![item], span)?;
+                                out.push(mapped);
+                            }
+                            Ok(Value::List(out))
+                        } else {
+                            Ok(Value::List(items))
+                        }
+                    }
+                    _ => Err(RuntimeError {
+                        message: "map expects Option/Result/List value".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
                 }
-                Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
-                    Ok(Value::Variant {
-                        name: "None".into(),
-                        payload: vec![],
-                    })
+            }
+            "and_then" => {
+                let callable = args.first().cloned();
+                match target {
+                    Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            self.call_callable(f, vec![payload[0].clone()], span)
+                        } else {
+                            Ok(Value::Variant { name: "Some".into(), payload })
+                        }
+                    }
+                    Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    }
+                    Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
+                        if let Some(f) = callable {
+                            self.call_callable(f, vec![payload[0].clone()], span)
+                        } else {
+                            Ok(Value::Variant { name: "Ok".into(), payload })
+                        }
+                    }
+                    Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
+                        Ok(Value::Variant { name: "Err".into(), payload })
+                    }
+                    _ => Err(RuntimeError {
+                        message: "and_then expects Option or Result".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
                 }
-                Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Ok".into(),
-                        payload,
-                    })
-                }
-                Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
-                    Ok(Value::Variant {
-                        name: "Err".into(),
-                        payload,
-                    })
-                }
-                _ => Err(RuntimeError {
-                    message: "and_then expects Option or Result".into(),
-                    span: Some(span),
-                    propagated_err: None,
-                }),
-            },
+            }
             "unwrap_or_else" => match target {
                 Value::Variant { name, payload } if name == "Ok" && payload.len() == 1 => {
                     Ok(payload[0].clone())
                 }
                 Value::Variant { name, payload } if name == "Err" && payload.len() == 1 => {
-                    if let Some(Value::String(_fn_name)) = args.first() {
-                        Ok(payload[0].clone())
+                    if let Some(callable) = args.first().cloned() {
+                        self.call_callable(callable, vec![payload[0].clone()], span)
                     } else {
                         Ok(Value::Unit)
                     }
@@ -1439,23 +1826,53 @@ impl Interpreter {
                 }),
             },
 
-            // List helpers (minimal builtins)
-            "filter" => match target {
-                Value::List(items) => Ok(Value::List(items)),
-                _ => Err(RuntimeError {
-                    message: "filter expects List".into(),
-                    span: Some(span),
-                    propagated_err: None,
-                }),
-            },
-            "fold" => match target {
-                Value::List(_items) => Ok(args.first().cloned().unwrap_or(Value::Unit)),
-                _ => Err(RuntimeError {
-                    message: "fold expects List".into(),
-                    span: Some(span),
-                    propagated_err: None,
-                }),
-            },
+            // List method-style helpers
+            "filter" => {
+                let callable = args.first().cloned();
+                match target {
+                    Value::List(items) => {
+                        if let Some(f) = callable {
+                            let mut out = Vec::new();
+                            for item in items {
+                                let keep = self.call_callable(f.clone(), vec![item.clone()], span)?;
+                                if as_bool(&keep) {
+                                    out.push(item);
+                                }
+                            }
+                            Ok(Value::List(out))
+                        } else {
+                            Ok(Value::List(items))
+                        }
+                    }
+                    _ => Err(RuntimeError {
+                        message: "filter expects List".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
+            "fold" => {
+                let init = args.first().cloned().unwrap_or(Value::Unit);
+                let callable = args.get(1).cloned();
+                match target {
+                    Value::List(items) => {
+                        if let Some(f) = callable {
+                            let mut acc = init;
+                            for item in items {
+                                acc = self.call_callable(f.clone(), vec![acc, item], span)?;
+                            }
+                            Ok(acc)
+                        } else {
+                            Ok(init)
+                        }
+                    }
+                    _ => Err(RuntimeError {
+                        message: "fold expects List".into(),
+                        span: Some(span),
+                        propagated_err: None,
+                    }),
+                }
+            }
             "collect" => match target {
                 Value::List(items) => Ok(Value::List(items)),
                 _ => Err(RuntimeError {
@@ -1495,17 +1912,6 @@ impl Interpreter {
                 }),
             },
 
-            // Existing
-            "unwrap" => match target {
-                Value::Variant { name, payload } if name == "Confident" && payload.len() == 1 => {
-                    Ok(payload[0].clone())
-                }
-                _ => Err(RuntimeError {
-                    message: "unwrap expects Confident(value)".into(),
-                    span: Some(span),
-                    propagated_err: None,
-                }),
-            },
             "candidates" => match target {
                 Value::Variant { name, payload } if name == "Uncertain" && payload.len() == 1 => {
                     Ok(payload[0].clone())
@@ -2365,6 +2771,13 @@ fn value_to_json(v: &Value) -> JsonValue {
             "__variant": name,
             "payload": payload.iter().map(value_to_json).collect::<Vec<_>>()
         }),
+        Value::Map(m) => {
+            let obj: serde_json::Map<String, JsonValue> = m.iter()
+                .map(|(k, v)| (k.clone(), value_to_json(v)))
+                .collect();
+            JsonValue::Object(obj)
+        }
+        Value::Closure { params, .. } => json!({ "__closure": params }),
     }
 }
 
@@ -2374,6 +2787,18 @@ fn type_error<T>(span: Span, msg: &str) -> Result<T, RuntimeError> {
         span: Some(span),
         propagated_err: None,
     })
+}
+
+fn cmp_values(a: &Value, b: &Value) -> std::cmp::Ordering {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x.cmp(y),
+        (Value::Float(x), Value::Float(y)) => x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Int(x), Value::Float(y)) => (*x as f64).partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::Float(x), Value::Int(y)) => x.partial_cmp(&(*y as f64)).unwrap_or(std::cmp::Ordering::Equal),
+        (Value::String(x), Value::String(y)) => x.cmp(y),
+        (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
+        _ => std::cmp::Ordering::Equal,
+    }
 }
 
 fn as_bool(v: &Value) -> bool {
@@ -2387,6 +2812,8 @@ fn as_bool(v: &Value) -> bool {
         Value::Tuple(xs) => !xs.is_empty(),
         Value::Record { .. } => true,
         Value::Variant { .. } => true,
+        Value::Map(m) => !m.is_empty(),
+        Value::Closure { .. } => true,
     }
 }
 
@@ -2401,6 +2828,13 @@ fn display_value(v: &Value) -> String {
         Value::Tuple(xs) => format!("{:?}", xs),
         Value::Record { name, fields } => format!("{} {:?}", name, fields),
         Value::Variant { name, payload } => format!("{}{:?}", name, payload),
+        Value::Map(m) => {
+            let mut pairs: Vec<_> = m.iter().collect();
+            pairs.sort_by_key(|(k, _)| k.as_str());
+            let inner: Vec<String> = pairs.iter().map(|(k, v)| format!("{}: {}", k, display_value(v))).collect();
+            format!("{{{}}}", inner.join(", "))
+        }
+        Value::Closure { params, .. } => format!("<fn({})>", params.join(", ")),
     }
 }
 
@@ -2415,6 +2849,8 @@ fn value_type_name(v: &Value) -> String {
         Value::Tuple(_) => "Tuple".into(),
         Value::Record { name, .. } => name.clone(),
         Value::Variant { name, .. } => name.clone(),
+        Value::Map(_) => "Map".into(),
+        Value::Closure { .. } => "Fn".into(),
     }
 }
 

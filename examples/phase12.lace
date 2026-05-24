@@ -1,0 +1,206 @@
+# Phase 12: Map<K,V>, First-class closures, Extended List stdlib, Option stdlib
+
+# ── Closures ──────────────────────────────────────────────────────────────────
+
+fn test_closures() -> Unit [Pure] {
+    let double = fn(x: Int) -> Int { x * 2 }
+    let add = fn(a: Int, b: Int) -> Int { a + b }
+
+    assert_eq(double(5), 10, "double(5) == 10")
+    assert_eq(add(3, 4), 7, "add(3, 4) == 7")
+
+    # Closures capture enclosing environment
+    let base = 100
+    let add_base = fn(n: Int) -> Int { base + n }
+    assert_eq(add_base(42), 142, "closure captures base=100")
+
+    # Closures as arguments to List.map / List.filter
+    let nums = [1, 2, 3, 4, 5]
+    let doubled = List.map(nums, fn(x: Int) -> Int { x * 2 })
+    assert_eq(doubled, [2, 4, 6, 8, 10], "List.map with closure")
+
+    let evens = List.filter(nums, fn(x: Int) -> Bool { x % 2 == 0 })
+    assert_eq(evens, [2, 4], "List.filter with closure")
+
+    # Named function reference still works
+    let tripled = List.map(nums, triple)
+    assert_eq(tripled, [3, 6, 9, 12, 15], "List.map with named fn ref")
+}
+
+fn triple(x: Int) -> Int [Pure] {
+    x * 3
+}
+
+# ── List.fold ─────────────────────────────────────────────────────────────────
+
+fn test_list_fold() -> Unit [Pure] {
+    let nums = [1, 2, 3, 4, 5]
+
+    let sum = List.fold(nums, 0, fn(acc: Int, x: Int) -> Int { acc + x })
+    assert_eq(sum, 15, "List.fold sum")
+
+    let product = List.fold(nums, 1, fn(acc: Int, x: Int) -> Int { acc * x })
+    assert_eq(product, 120, "List.fold product")
+
+    # fold to build a string
+    let words = ["hello", " ", "world"]
+    let sentence = List.fold(words, "", fn(acc: String, w: String) -> String { acc ++ w })
+    assert_eq(sentence, "hello world", "List.fold concat")
+}
+
+# ── List.zip ──────────────────────────────────────────────────────────────────
+
+fn test_list_zip() -> Unit [Pure] {
+    let a = [1, 2, 3]
+    let b = ["one", "two", "three"]
+    let zipped = List.zip(a, b)
+    assert_eq(List.length(zipped), 3, "zip length")
+
+    let first_pair = zipped[0]
+    assert_eq(first_pair, (1, "one"), "zip first pair")
+}
+
+# ── List.sort ─────────────────────────────────────────────────────────────────
+
+fn test_list_sort() -> Unit [Pure] {
+    let unsorted = [5, 2, 8, 1, 9, 3]
+    let sorted = List.sort(unsorted)
+    assert_eq(sorted, [1, 2, 3, 5, 8, 9], "List.sort integers")
+
+    let words = ["banana", "apple", "cherry"]
+    let sorted_words = List.sort(words)
+    assert_eq(sorted_words, ["apple", "banana", "cherry"], "List.sort strings")
+}
+
+# ── List.contains, sum, min, max ──────────────────────────────────────────────
+
+fn test_list_extras() -> Unit [Pure] {
+    let nums = [3, 1, 4, 1, 5, 9, 2, 6]
+
+    assert(List.contains(nums, 5), "contains 5")
+    assert(!List.contains(nums, 7), "does not contain 7")
+
+    let s = List.sum(nums)
+    assert_eq(s, 31, "sum is 31")
+
+    let mn = List.min(nums)
+    assert_eq(mn, Some(1), "min is Some(1)")
+
+    let mx = List.max(nums)
+    assert_eq(mx, Some(9), "max is Some(9)")
+
+    let empty_min = List.min([])
+    assert_eq(empty_min, None(), "min of empty is None")
+}
+
+# ── List.flat_map ─────────────────────────────────────────────────────────────
+
+fn test_flat_map() -> Unit [Pure] {
+    let nums = [1, 2, 3]
+    let result = List.flat_map(nums, fn(x: Int) -> List<Int> { [x, x * 10] })
+    assert_eq(result, [1, 10, 2, 20, 3, 30], "List.flat_map")
+}
+
+# ── Map stdlib ────────────────────────────────────────────────────────────────
+
+fn test_map() -> Unit [Pure] {
+    let m0 = Map.new()
+    assert_eq(Map.length(m0), 0, "new map is empty")
+
+    let m1 = Map.insert(m0, "alice", 30)
+    let m2 = Map.insert(m1, "bob", 25)
+    let m3 = Map.insert(m2, "carol", 35)
+
+    assert_eq(Map.length(m3), 3, "map has 3 entries")
+
+    assert(Map.contains_key(m3, "alice"), "contains alice")
+    assert(!Map.contains_key(m3, "dave"), "does not contain dave")
+
+    let alice_age = Map.get(m3, "alice")
+    assert_eq(alice_age, Some(30), "alice age is 30")
+
+    let missing = Map.get(m3, "nobody")
+    assert_eq(missing, None(), "missing key returns None")
+
+    # keys / values / entries are sorted by key
+    let keys = Map.keys(m3)
+    assert_eq(keys, ["alice", "bob", "carol"], "keys sorted")
+
+    let vals = Map.values(m3)
+    assert_eq(vals, [30, 25, 35], "values in key order")
+
+    # remove
+    let m4 = Map.remove(m3, "bob")
+    assert_eq(Map.length(m4), 2, "map after remove has 2 entries")
+    assert(!Map.contains_key(m4, "bob"), "bob removed")
+    assert(Map.contains_key(m4, "alice"), "alice still present")
+}
+
+# ── Option stdlib ─────────────────────────────────────────────────────────────
+
+fn test_option() -> Unit [Pure] {
+    let s = Some(42)
+    let n = None()
+
+    assert(s.is_some(), "Some is_some")
+    assert(!s.is_none(), "Some is not is_none")
+    assert(!n.is_some(), "None is not is_some")
+    assert(n.is_none(), "None is_none")
+
+    assert_eq(s.unwrap(), 42, "unwrap Some(42)")
+    assert_eq(s.unwrap_or(0), 42, "unwrap_or on Some")
+    assert_eq(n.unwrap_or(99), 99, "unwrap_or on None")
+
+    let mapped = s.map(fn(x: Int) -> Int { x * 2 })
+    assert_eq(mapped, Some(84), "Option.map")
+
+    let mapped_none = n.map(fn(x: Int) -> Int { x * 2 })
+    assert_eq(mapped_none, None(), "Option.map on None")
+
+    let chained = s.and_then(fn(x: Int) -> Option<Int> { Some(x + 1) })
+    assert_eq(chained, Some(43), "Option.and_then")
+}
+
+# ── Closures capturing variables (counter pattern) ────────────────────────────
+
+fn test_closure_capture() -> Unit [Pure] {
+    let factor = 7
+    let multiply = fn(x: Int) -> Int { x * factor }
+    let results = List.map([1, 2, 3, 4], multiply)
+    assert_eq(results, [7, 14, 21, 28], "closure captures factor=7")
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+fn main() -> Unit [IO] {
+    println("Phase 12: Map, closures, extended stdlib")
+
+    test_closures()
+    println("  closures: ok")
+
+    test_list_fold()
+    println("  List.fold: ok")
+
+    test_list_zip()
+    println("  List.zip: ok")
+
+    test_list_sort()
+    println("  List.sort: ok")
+
+    test_list_extras()
+    println("  List.contains/sum/min/max: ok")
+
+    test_flat_map()
+    println("  List.flat_map: ok")
+
+    test_map()
+    println("  Map stdlib: ok")
+
+    test_option()
+    println("  Option stdlib: ok")
+
+    test_closure_capture()
+    println("  closure capture: ok")
+
+    println("All Phase 12 assertions passed!")
+}

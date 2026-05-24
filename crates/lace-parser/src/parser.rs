@@ -1216,6 +1216,7 @@ impl Parser {
             }
             TokenKind::LBracket => self.parse_list_literal(),
             TokenKind::LParen => self.parse_paren_or_tuple(),
+            TokenKind::Fn => self.parse_closure_expr(),
             TokenKind::TypeIdent(_) => self.parse_type_ident_expr(),
             TokenKind::IntLit(v) => {
                 self.bump();
@@ -1244,8 +1245,57 @@ impl Parser {
         }
     }
 
-    fn parse_if_expr(&mut self) -> Option<Expr> {
-        let start = self.expect(TokenKind::If)?.span.start;
+    fn parse_closure_expr(&mut self) -> Option<Expr> {
+        let start = self.expect(TokenKind::Fn)?.span.start;
+        self.expect(TokenKind::LParen)?;
+        let mut params = Vec::new();
+        if !self.at(&TokenKind::RParen) {
+            loop {
+                let pstart = self.curr_span().start;
+                let pname = self.expect_ident()?;
+                let ty = if self.match_tok(&TokenKind::Colon) {
+                    Some(self.parse_type_expr()?)
+                } else {
+                    None
+                };
+                params.push(ClosureParam {
+                    name: pname,
+                    ty,
+                    span: Span { start: pstart, end: self.prev_span().end },
+                });
+                if self.match_tok(&TokenKind::Comma) {
+                    if self.at(&TokenKind::RParen) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(TokenKind::RParen)?;
+        let ret_ty = if self.match_tok(&TokenKind::Arrow) {
+            Some(self.parse_type_expr()?)
+        } else {
+            None
+        };
+        // Optional effects like [Pure]
+        let effects = if self.at(&TokenKind::LBracket) {
+            self.parse_effect_ann()?
+        } else {
+            Vec::new()
+        };
+        let body = self.parse_block()?;
+        let end = body.span.end;
+        Some(Expr::Closure(ClosureExpr {
+            params,
+            ret_ty,
+            effects,
+            body,
+            span: Span { start, end },
+        }))
+    }
+
+    fn parse_if_expr(&mut self) -> Option<Expr> {        let start = self.expect(TokenKind::If)?.span.start;
         let mut branches = Vec::new();
         let cond = self.parse_expr()?;
         let block = self.parse_block()?;

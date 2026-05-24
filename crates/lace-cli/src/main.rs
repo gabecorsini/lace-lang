@@ -537,6 +537,8 @@ fn value_type_name(v: &Value) -> &'static str {
         Value::Tuple(_) => "Tuple",
         Value::Record { .. } => "Record",
         Value::Variant { .. } => "Variant",
+        Value::Map(_) => "Map",
+        Value::Closure { .. } => "Fn",
     }
 }
 

@@ -111,6 +111,7 @@ impl Checker {
         // Register module names as dynamic values so FieldAccess type-checks pass
         self.scopes[0].vars.insert("List".into(), Type::Dynamic);
         self.scopes[0].vars.insert("File".into(), Type::Dynamic);
+        self.scopes[0].vars.insert("Map".into(), Type::Dynamic);
 
         self.fn_sigs
             .insert("print".into(), (vec![Type::String], Type::Unit));
@@ -158,6 +159,131 @@ impl Checker {
                     Type::Fn(vec![Type::Dynamic], Box::new(Type::Bool)),
                 ],
                 Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "List.fold".into(),
+            (
+                vec![
+                    Type::List(Box::new(Type::Dynamic)),
+                    Type::Dynamic,
+                    Type::Fn(vec![Type::Dynamic, Type::Dynamic], Box::new(Type::Dynamic)),
+                ],
+                Type::Dynamic,
+            ),
+        );
+        self.fn_sigs.insert(
+            "List.flat_map".into(),
+            (
+                vec![
+                    Type::List(Box::new(Type::Dynamic)),
+                    Type::Fn(vec![Type::Dynamic], Box::new(Type::List(Box::new(Type::Dynamic)))),
+                ],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "List.zip".into(),
+            (
+                vec![
+                    Type::List(Box::new(Type::Dynamic)),
+                    Type::List(Box::new(Type::Dynamic)),
+                ],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "List.sort".into(),
+            (vec![Type::List(Box::new(Type::Dynamic))], Type::List(Box::new(Type::Dynamic))),
+        );
+        self.fn_sigs.insert(
+            "List.contains".into(),
+            (vec![Type::List(Box::new(Type::Dynamic)), Type::Dynamic], Type::Bool),
+        );
+        self.fn_sigs.insert(
+            "List.sum".into(),
+            (vec![Type::List(Box::new(Type::Dynamic))], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "List.min".into(),
+            (vec![Type::List(Box::new(Type::Dynamic))], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "List.max".into(),
+            (vec![Type::List(Box::new(Type::Dynamic))], Type::Dynamic),
+        );
+        // Map stdlib
+        self.fn_sigs.insert(
+            "Map.new".into(),
+            (vec![], Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))),
+        );
+        self.fn_sigs.insert(
+            "Map.insert".into(),
+            (
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+                    Type::String,
+                    Type::Dynamic,
+                ],
+                Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.get".into(),
+            (
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+                    Type::String,
+                ],
+                Type::Option(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.remove".into(),
+            (
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+                    Type::String,
+                ],
+                Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.contains_key".into(),
+            (
+                vec![
+                    Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)),
+                    Type::String,
+                ],
+                Type::Bool,
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.keys".into(),
+            (
+                vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))],
+                Type::List(Box::new(Type::String)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.values".into(),
+            (
+                vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.entries".into(),
+            (
+                vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))],
+                Type::List(Box::new(Type::Dynamic)),
+            ),
+        );
+        self.fn_sigs.insert(
+            "Map.length".into(),
+            (
+                vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))],
+                Type::Int,
             ),
         );
         // Result / Option variant constructors
@@ -558,6 +684,13 @@ impl Checker {
                         }
                     }
                     ret
+                } else if let Some(var_ty) = self.lookup(call.name.as_str()) {
+                    // Variable bound to a Fn type (e.g., closure assigned to let)
+                    match var_ty {
+                        Type::Fn(_, ret) => *ret,
+                        Type::Dynamic | Type::Unknown => Type::Dynamic,
+                        _ => Type::Dynamic,
+                    }
                 } else {
                     self.errors.push(TypeError::UnknownFunction {
                         name: call.name.clone(),
