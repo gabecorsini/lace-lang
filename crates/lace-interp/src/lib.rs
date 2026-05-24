@@ -2054,6 +2054,223 @@ impl Interpreter {
                 }),
             },
 
+            // Additional string methods
+            "replace" => match target {
+                Value::String(s) => {
+                    let from = args.first().map(display_value).unwrap_or_default();
+                    let to = args.get(1).map(display_value).unwrap_or_default();
+                    Ok(Value::String(s.replace(&from, &to)))
+                }
+                _ => Err(RuntimeError {
+                    message: "replace expects String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "is_empty" => match target {
+                Value::String(s) => Ok(Value::Bool(s.is_empty())),
+                Value::List(items) => Ok(Value::Bool(items.is_empty())),
+                _ => Err(RuntimeError {
+                    message: "is_empty expects String or List".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "char_at" => match target {
+                Value::String(s) => {
+                    let idx = match args.first() {
+                        Some(Value::Int(i)) => *i,
+                        _ => return Err(RuntimeError {
+                            message: "char_at expects an Int index".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        }),
+                    };
+                    let chars: Vec<char> = s.chars().collect();
+                    if idx < 0 || idx as usize >= chars.len() {
+                        Ok(Value::Variant { name: "None".into(), payload: vec![] })
+                    } else {
+                        Ok(Value::Variant {
+                            name: "Some".into(),
+                            payload: vec![Value::String(chars[idx as usize].to_string())],
+                        })
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "char_at expects String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "parse_int" => match target {
+                Value::String(s) => {
+                    match s.trim().parse::<i64>() {
+                        Ok(n) => Ok(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(n)] }),
+                        Err(e) => Ok(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] }),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "parse_int expects String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "parse_float" => match target {
+                Value::String(s) => {
+                    match s.trim().parse::<f64>() {
+                        Ok(f) => Ok(Value::Variant { name: "Ok".into(), payload: vec![Value::Float(f)] }),
+                        Err(e) => Ok(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] }),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "parse_float expects String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "to_int" => match target {
+                Value::Int(n) => Ok(Value::Int(n)),
+                Value::Float(f) => Ok(Value::Int(f as i64)),
+                Value::String(s) => {
+                    match s.trim().parse::<i64>() {
+                        Ok(n) => Ok(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(n)] }),
+                        Err(e) => Ok(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] }),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "to_int expects Int, Float, or String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "to_float" => match target {
+                Value::Float(f) => Ok(Value::Float(f)),
+                Value::Int(n) => Ok(Value::Float(n as f64)),
+                Value::String(s) => {
+                    match s.trim().parse::<f64>() {
+                        Ok(f) => Ok(Value::Variant { name: "Ok".into(), payload: vec![Value::Float(f)] }),
+                        Err(e) => Ok(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] }),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "to_float expects Int, Float, or String".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            // Numeric methods
+            "abs" => match target {
+                Value::Int(n) => Ok(Value::Int(n.abs())),
+                Value::Float(f) => Ok(Value::Float(f.abs())),
+                _ => Err(RuntimeError {
+                    message: "abs expects Int or Float".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "floor" => match target {
+                Value::Float(f) => Ok(Value::Float(f.floor())),
+                Value::Int(n) => Ok(Value::Int(n)),
+                _ => Err(RuntimeError {
+                    message: "floor expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "ceil" => match target {
+                Value::Float(f) => Ok(Value::Float(f.ceil())),
+                Value::Int(n) => Ok(Value::Int(n)),
+                _ => Err(RuntimeError {
+                    message: "ceil expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "round" => match target {
+                Value::Float(f) => Ok(Value::Float(f.round())),
+                Value::Int(n) => Ok(Value::Int(n)),
+                _ => Err(RuntimeError {
+                    message: "round expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "sqrt" => match target {
+                Value::Float(f) => Ok(Value::Float(f.sqrt())),
+                Value::Int(n) => Ok(Value::Float((n as f64).sqrt())),
+                _ => Err(RuntimeError {
+                    message: "sqrt expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "pow" => match target {
+                Value::Float(f) => {
+                    let exp = match args.first() {
+                        Some(Value::Float(e)) => *e,
+                        Some(Value::Int(e)) => *e as f64,
+                        _ => return Err(RuntimeError {
+                            message: "pow expects a numeric exponent".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        }),
+                    };
+                    Ok(Value::Float(f.powf(exp)))
+                }
+                Value::Int(n) => {
+                    match args.first() {
+                        Some(Value::Int(e)) if *e >= 0 => {
+                            Ok(Value::Int(n.pow(*e as u32)))
+                        }
+                        Some(Value::Int(e)) => Ok(Value::Float((n as f64).powi(*e as i32))),
+                        Some(Value::Float(e)) => Ok(Value::Float((n as f64).powf(*e))),
+                        _ => Err(RuntimeError {
+                            message: "pow expects a numeric exponent".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        }),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "pow expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
+            "log" => match target {
+                Value::Float(f) => {
+                    let base = match args.first() {
+                        Some(Value::Float(b)) => *b,
+                        Some(Value::Int(b)) => *b as f64,
+                        None => std::f64::consts::E,
+                        _ => return Err(RuntimeError {
+                            message: "log expects an optional numeric base".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        }),
+                    };
+                    Ok(Value::Float(f.log(base)))
+                }
+                Value::Int(n) => {
+                    let f = n as f64;
+                    let base = match args.first() {
+                        Some(Value::Float(b)) => *b,
+                        Some(Value::Int(b)) => *b as f64,
+                        None => std::f64::consts::E,
+                        _ => return Err(RuntimeError {
+                            message: "log expects an optional numeric base".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        }),
+                    };
+                    Ok(Value::Float(f.log(base)))
+                }
+                _ => Err(RuntimeError {
+                    message: "log expects Float or Int".into(),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
+            },
             // List method-style helpers
             "filter" => {
                 let callable = args.first().cloned();
@@ -2625,39 +2842,82 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         match op {
             BinaryOp::Add => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+                (Value::Int(a), Value::Int(b)) => a.checked_add(b).map(Value::Int).ok_or_else(|| RuntimeError {
+                    message: format!("integer overflow: {} + {}", a, b),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a + b as f64)),
                 _ => type_error(span, "'+' expects numeric operands"),
             },
             BinaryOp::Sub => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+                (Value::Int(a), Value::Int(b)) => a.checked_sub(b).map(Value::Int).ok_or_else(|| RuntimeError {
+                    message: format!("integer overflow: {} - {}", a, b),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 - b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a - b as f64)),
                 _ => type_error(span, "'-' expects numeric operands"),
             },
             BinaryOp::Mul => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+                (Value::Int(a), Value::Int(b)) => a.checked_mul(b).map(Value::Int).ok_or_else(|| RuntimeError {
+                    message: format!("integer overflow: {} * {}", a, b),
+                    span: Some(span),
+                    propagated_err: None,
+                }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 * b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a * b as f64)),
                 _ => type_error(span, "'*' expects numeric operands"),
             },
             BinaryOp::Div => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a / b)),
+                (Value::Int(a), Value::Int(b)) => {
+                    if b == 0 {
+                        return Err(RuntimeError {
+                            message: "division by zero".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        });
+                    }
+                    a.checked_div(b).map(Value::Int).ok_or_else(|| RuntimeError {
+                        message: format!("integer overflow: {} / {}", a, b),
+                        span: Some(span),
+                        propagated_err: None,
+                    })
+                }
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 / b)),
                 (Value::Float(a), Value::Int(b)) => Ok(Value::Float(a / b as f64)),
                 _ => type_error(span, "'/' expects numeric operands"),
             },
             BinaryOp::IntDiv => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a.div_euclid(b))),
+                (Value::Int(a), Value::Int(b)) => {
+                    if b == 0 {
+                        return Err(RuntimeError {
+                            message: "division by zero".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        });
+                    }
+                    Ok(Value::Int(a.div_euclid(b)))
+                }
                 _ => type_error(span, "'//' expects integer operands"),
             },
             BinaryOp::Rem => match (left, right) {
-                (Value::Int(a), Value::Int(b)) => Ok(Value::Int(a % b)),
+                (Value::Int(a), Value::Int(b)) => {
+                    if b == 0 {
+                        return Err(RuntimeError {
+                            message: "remainder by zero".into(),
+                            span: Some(span),
+                            propagated_err: None,
+                        });
+                    }
+                    Ok(Value::Int(a % b))
+                }
                 _ => type_error(span, "'%' expects integer operands"),
             },
             BinaryOp::Eq => Ok(Value::Bool(left == right)),

@@ -970,6 +970,11 @@ impl Checker {
                     self.define(p.name.clone(), t.clone());
                     params.push(t);
                 }
+                // Check all statements in the closure body so that let-bound
+                // closures are visible to subsequent calls within the same body.
+                for s in &c.body.stmts {
+                    self.check_stmt(s);
+                }
                 let ret = c
                     .ret_ty
                     .as_ref()
