@@ -150,9 +150,32 @@ enum Commands {
         /// Source (.lace) or bytecode (.lacec) file to run
         file: String,
     },
+    /// Bundle a .lace program into a self-contained executable
+    Bundle {
+        /// Source file to bundle
+        file: String,
+        /// Output path (defaults to <stem>.bin)
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 fn main() {
+    // Check if we are a bundled binary
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(bytes) = std::fs::read(&exe) {
+            if let Some(bytecode) = extract_bundle(&bytes) {
+                let tool_log = !std::env::args().any(|a| a == "--no-tool-log");
+                match lace_vm::run_bytes(&bytecode, tool_log) {
+                    Ok(_) => std::process::exit(0),
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
     if let Err(err) = run() {
         eprintln!("{} {}", "error:".red().bold(), format!("{err:#}").red());
         std::process::exit(1);
@@ -385,6 +408,9 @@ fn run() -> Result<()> {
                 eprintln!("{} {}", "vm error:".red().bold(), format!("{e}").red());
                 std::process::exit(1);
             }
+        }
+        Commands::Bundle { file, output } => {
+            run_bundle(&file, output.as_deref())?;
         }
     }
 
@@ -1608,4 +1634,78 @@ fn fmt_effect_expr(expr: &lace_ast::EffectExpr) -> String {
         },
         EffectExpr::Variable(name) => name.clone(),
     }
+}
+
+// ─── Bundle ──────────────────────────────────────────────────────────────────
+
+const BUNDLE_MAGIC: &[u8] = &[0x4C, 0x41, 0x43, 0x45, 0x42, 0x4E, 0x44, 0x4C]; // "LACEBNDL"
+
+fn extract_bundle(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 16 {
+        return None;
+    }
+    let tail = &bytes[bytes.len() - 8..];
+    if tail != BUNDLE_MAGIC {
+        return None;
+    }
+    let len_bytes = &bytes[bytes.len() - 16..bytes.len() - 8];
+    let len = u64::from_le_bytes(len_bytes.try_into().ok()?) as usize;
+    let start = bytes.len().checked_sub(16 + len)?;
+    Some(bytes[start..bytes.len() - 16].to_vec())
+}
+
+fn run_bundle(file: &str, output: Option<&str>) -> Result<()> {
+    let source = fs::read_to_string(file)
+        .with_context(|| format!("failed to read {file}"))?;
+
+    let bytecode = lace_vm::compile_to_bytes(&source)
+        .map_err(|e| anyhow::anyhow!("compile error: {}", e))?;
+
+    let exe = std::env::current_exe().context("failed to get current executable")?;
+    let mut exe_bytes = fs::read(&exe)
+        .with_context(|| format!("failed to read executable {}", exe.display()))?;
+
+    // If the current exe is itself a bundle, strip the trailer so we don't double-embed
+    if extract_bundle(&exe_bytes).is_some() {
+        let trailer_len = 16 + {
+            let len_bytes = &exe_bytes[exe_bytes.len() - 16..exe_bytes.len() - 8];
+            u64::from_le_bytes(len_bytes.try_into().unwrap()) as usize
+        };
+        let new_len = exe_bytes.len() - trailer_len;
+        exe_bytes.truncate(new_len);
+    }
+
+    // Append bytecode + length (u64 LE) + magic
+    exe_bytes.extend_from_slice(&bytecode);
+    let len_bytes = (bytecode.len() as u64).to_le_bytes();
+    exe_bytes.extend_from_slice(&len_bytes);
+    exe_bytes.extend_from_slice(BUNDLE_MAGIC);
+
+    // Determine output path
+    let out_path = if let Some(o) = output {
+        PathBuf::from(o)
+    } else {
+        PathBuf::from(file).with_extension("bin")
+    };
+
+    fs::write(&out_path, &exe_bytes)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
+
+    // Set executable bit on unix
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&out_path)?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&out_path, perms)?;
+    }
+
+    println!(
+        "{} {}  ({} bytes)",
+        "bundled:".green().bold(),
+        out_path.display(),
+        exe_bytes.len()
+    );
+
+    Ok(())
 }

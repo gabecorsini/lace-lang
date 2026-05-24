@@ -34,6 +34,7 @@
       <li><a href="#new">lace new</a></li>
       <li><a href="#compile">lace compile</a></li>
       <li><a href="#vm">lace vm</a></li>
+      <li><a href="#bundle">lace bundle</a></li>
       <li><a href="#codes">Error Codes</a></li>
       <li><a href="#toml">lace.toml</a></li>
     </ul>
@@ -113,6 +114,17 @@ lace explain W004</code></pre>
     <pre><code>lace vm &lt;file&gt;</code></pre>
     <pre><code>lace vm src/main.lacec
 lace vm src/main.lace   # compiles on the fly</code></pre>
+
+    <h2 id="bundle">lace bundle</h2>
+    <p>Compile and embed bytecode into a self-contained executable. No lace install needed to run.</p>
+    <pre><code>lace bundle &lt;file&gt; [--output &lt;path&gt;]</code></pre>
+    <pre><code>lace bundle src/main.lace
+# bundled: src/main.bin  (2.1 MB)
+./src/main.bin           # runs anywhere, no lace required</code></pre>
+    <table>
+      <tr><th>Flag</th><th>Description</th></tr>
+      <tr><td><code>--output &lt;path&gt;</code></td><td>Write the bundle to this path instead of <code>&lt;stem&gt;.bin</code></td></tr>
+    </table>
 
     <h2 id="codes">Error &amp; Warning Codes</h2>
     <table>

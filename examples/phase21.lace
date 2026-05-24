@@ -1,0 +1,13 @@
+## Phase 21 — lace bundle demo
+## Build: lace bundle examples/phase21.lace
+## Run:   ./examples/phase21.bin
+
+tool greet(name: String) -> Result<String, String> {
+    Ok("Hello, " ++ name ++ "! 🧵")
+}
+
+let result = greet("world")
+match result {
+    Ok(msg) => print(msg),
+    Err(e)  => print("Error: " ++ e),
+}
