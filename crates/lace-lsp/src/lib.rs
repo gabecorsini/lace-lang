@@ -189,6 +189,7 @@ fn span_to_range(source: &str, start: usize, end: usize) -> Range {
 }
 
 /// Convert an LSP Position to a byte offset in source.
+#[allow(dead_code)]
 fn position_to_offset(source: &str, pos: Position) -> usize {
     let target_line = pos.line as usize;
     let target_char = pos.character as usize;
@@ -211,6 +212,7 @@ fn position_to_offset(source: &str, pos: Position) -> usize {
     offset
 }
 
+#[allow(dead_code)]
 fn line_start_offset(source: &str, target_line: usize) -> usize {
     let mut line = 0;
     let mut offset = 0;
@@ -257,12 +259,14 @@ struct SymbolInfo {
     name: String,
     kind: SymbolKind,
     /// Byte offset of the definition
+    #[allow(dead_code)]
     def_offset: usize,
     /// Hover text (signature + doc)
     hover_text: String,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum SymbolKind {
     Function,
     Variable,

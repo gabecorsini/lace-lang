@@ -7,6 +7,7 @@ use crate::error::VmError;
 use crate::opcode::OpCode;
 
 struct Compiler {
+    #[allow(dead_code)]
     chunks: Vec<Chunk>,
     /// Names of tool functions (for CallTool vs Call distinction).
     tool_names: std::collections::HashSet<String>,

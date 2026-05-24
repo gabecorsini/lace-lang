@@ -1003,7 +1003,7 @@ impl Interpreter {
         &mut self,
         f: &FunctionDef,
         args: Vec<Value>,
-        span: Span,
+        _span: Span,
     ) -> Result<Value, RuntimeError> {
         self.call_stack.push(CallFrame {
             effects: f.effects.clone(),
