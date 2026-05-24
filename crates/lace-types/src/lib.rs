@@ -57,6 +57,13 @@ pub enum TypeError {
     },
     #[error("invalid tool declaration '{name}': {message}")]
     InvalidToolDecl { name: String, message: String },
+    #[error("non-exhaustive match on '{enum_name}': missing variant(s) {missing:?} at {span_start}..{span_end}")]
+    NonExhaustiveMatch {
+        enum_name: String,
+        missing: Vec<String>,
+        span_start: usize,
+        span_end: usize,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -81,6 +88,7 @@ struct Checker {
     scopes: Vec<Scope>,
     fn_sigs: HashMap<String, (Vec<Type>, Type)>,
     record_types: HashMap<String, BTreeMap<String, Type>>,
+    enum_variants: HashMap<String, Vec<String>>,
     errors: Vec<TypeError>,
 }
 
@@ -92,6 +100,7 @@ impl Checker {
             }],
             fn_sigs: HashMap::new(),
             record_types: HashMap::new(),
+            enum_variants: HashMap::new(),
             errors: Vec::new(),
         };
         checker.install_prelude();
@@ -206,6 +215,30 @@ impl Checker {
                         .collect::<Vec<_>>();
                     let ret = self.resolve_type_expr(&t.ret_ty);
                     self.fn_sigs.insert(t.name.clone(), (params, ret));
+                }
+                TopLevelItem::Enum(e) => {
+                    let variants = e.variants.iter().map(|v| v.name.clone()).collect();
+                    self.enum_variants.insert(e.name.clone(), variants);
+                    // Register variant constructors so type checker accepts them
+                    for variant in &e.variants {
+                        match &variant.body {
+                            None => {
+                                // Unit variant: register as a value in scope
+                                self.scopes[0].vars.insert(
+                                    variant.name.clone(),
+                                    Type::Named(e.name.clone(), vec![]),
+                                );
+                            }
+                            Some(EnumVariantBody::Tuple(_)) => {
+                                // Tuple variant: register as a constructor function
+                                self.fn_sigs.insert(
+                                    variant.name.clone(),
+                                    (vec![Type::Dynamic], Type::Named(e.name.clone(), vec![])),
+                                );
+                            }
+                            Some(EnumVariantBody::Struct(_)) => {}
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -473,6 +506,9 @@ impl Checker {
             Expr::Match(m) => {
                 let scrutinee = self.infer_expr(&m.expr);
                 let mut out: Option<Type> = None;
+                // Collect arm pattern names to check exhaustiveness
+                let mut covered_variants: Vec<String> = Vec::new();
+                let mut has_wildcard = false;
                 for arm in &m.arms {
                     self.push_scope();
                     self.bind_pattern(&arm.pattern, &scrutinee);
@@ -482,6 +518,30 @@ impl Checker {
                         Some(prev) => self.unify_soft(prev, t),
                         None => t,
                     });
+                    match &arm.pattern {
+                        Pattern::Wildcard(_) | Pattern::Ident(_, _) => has_wildcard = true,
+                        Pattern::EnumTuple { name, .. } => covered_variants.push(name.clone()),
+                        _ => {}
+                    }
+                }
+                // Exhaustiveness check for known enum types
+                if !has_wildcard {
+                    if let Type::Named(enum_name, _) = &scrutinee {
+                        if let Some(all_variants) = self.enum_variants.get(enum_name).cloned() {
+                            let missing: Vec<String> = all_variants
+                                .into_iter()
+                                .filter(|v| !covered_variants.contains(v))
+                                .collect();
+                            if !missing.is_empty() {
+                                self.errors.push(TypeError::NonExhaustiveMatch {
+                                    enum_name: enum_name.clone(),
+                                    missing,
+                                    span_start: m.span.start,
+                                    span_end: m.span.end,
+                                });
+                            }
+                        }
+                    }
                 }
                 out.unwrap_or(Type::Unit)
             }
@@ -678,6 +738,7 @@ impl Checker {
                 Type::Result(ok, _err) => *ok,
                 other => other,
             },
+            Expr::Break { .. } | Expr::Continue { .. } => Type::Unit,
         }
     }
 
@@ -728,6 +789,12 @@ impl Checker {
                 ("None", Type::Option(_)) if elems.is_empty() => {}
                 // Allow any constructor pattern on Dynamic/Unknown types
                 (_, Type::Dynamic) | (_, Type::Unknown) => {
+                    for elem in elems {
+                        self.bind_pattern(elem, &Type::Dynamic);
+                    }
+                }
+                // Allow enum variant constructor patterns on Named types
+                (_, Type::Named(_, _)) => {
                     for elem in elems {
                         self.bind_pattern(elem, &Type::Dynamic);
                     }

@@ -12,6 +12,31 @@ pub enum ParseError {
     },
 }
 
+/// Convert a byte offset into (1-based line, 1-based column).
+pub fn offset_to_line_col(source: &str, offset: usize) -> (usize, usize) {
+    let offset = offset.min(source.len());
+    let before = &source[..offset];
+    let line = before.chars().filter(|&c| c == '\n').count() + 1;
+    let col = before.rfind('\n').map(|p| offset - p - 1).unwrap_or(offset) + 1;
+    (line, col)
+}
+
+impl ParseError {
+    /// Format this error with source context: filename, line/col, offending line, and caret.
+    pub fn format_rich(&self, source: &str, filename: &str) -> String {
+        match self {
+            ParseError::Message { message, span_start, .. } => {
+                let (line, col) = offset_to_line_col(source, *span_start);
+                let source_line = source.lines().nth(line - 1).unwrap_or("").to_string();
+                let caret = " ".repeat(col.saturating_sub(1)) + "^";
+                format!(
+                    "{filename}:{line}:{col}: error: {message}\n  {source_line}\n  {caret}"
+                )
+            }
+        }
+    }
+}
+
 pub fn parse_program(source: &str) -> (Option<Program>, Vec<ParseError>) {
     let (tokens, lex_errors) = lex(source);
     let mut errors = Vec::new();
@@ -1165,6 +1190,24 @@ impl Parser {
                 };
                 Some(Expr::Return {
                     value,
+                    span: Span {
+                        start,
+                        end: self.prev_span().end,
+                    },
+                })
+            }
+            TokenKind::Break => {
+                self.bump();
+                Some(Expr::Break {
+                    span: Span {
+                        start,
+                        end: self.prev_span().end,
+                    },
+                })
+            }
+            TokenKind::Continue => {
+                self.bump();
+                Some(Expr::Continue {
                     span: Span {
                         start,
                         end: self.prev_span().end,

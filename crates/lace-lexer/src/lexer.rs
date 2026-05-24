@@ -276,6 +276,8 @@ impl<'a> Lexer<'a> {
             "else" => TokenKind::Else,
             "match" => TokenKind::Match,
             "return" => TokenKind::Return,
+            "break" => TokenKind::Break,
+            "continue" => TokenKind::Continue,
             "true" => TokenKind::BoolLit(true),
             "false" => TokenKind::BoolLit(false),
             "retries" => TokenKind::Retries,

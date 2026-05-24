@@ -319,6 +319,7 @@ impl<'a> Checker<'a> {
                     8 + elems.iter().map(score_expr).sum::<i64>()
                 }
                 Expr::Return { value, .. } => value.as_ref().map(|v| score_expr(v)).unwrap_or(4),
+                Expr::Break { .. } | Expr::Continue { .. } => 1,
             }
         }
 
@@ -524,7 +525,7 @@ impl<'a> Checker<'a> {
                     self.scan_expr_for_unhandled(v, function, false);
                 }
             }
-            Expr::Literal(_, _) | Expr::Ident(_, _) => {}
+            Expr::Literal(_, _) | Expr::Ident(_, _) | Expr::Break { .. } | Expr::Continue { .. } => {}
         }
     }
 
@@ -681,6 +682,7 @@ impl<'a> Checker<'a> {
                 .as_ref()
                 .map(|e| self.infer_expr_effects(e, fn_name, in_pure_block))
                 .unwrap_or_else(EffectSet::empty),
+            Expr::Break { .. } | Expr::Continue { .. } => EffectSet::empty(),
         }
     }
 }

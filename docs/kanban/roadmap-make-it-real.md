@@ -24,7 +24,7 @@ Not production-ready, but *credibly good*. Docs, ergonomics, error messages, std
 
 ---
 
-## Phase 11 — Match exhaustiveness + control flow
+## Phase 11 — Match exhaustiveness + control flow ✓ DONE
 - Exhaustive `match` on variants and records (compiler error if arms missing)
 - `if/else if/else` chains (not just binary if)
 - `break` and `continue` in loops

@@ -588,6 +588,11 @@ fn type_error_span(err: &TypeError) -> Option<(usize, usize)> {
             ..
         } => Some((*span_start, *span_end)),
         TypeError::UnknownRecordType { .. } | TypeError::InvalidToolDecl { .. } => None,
+        TypeError::NonExhaustiveMatch {
+            span_start,
+            span_end,
+            ..
+        } => Some((*span_start, *span_end)),
     }
 }
 

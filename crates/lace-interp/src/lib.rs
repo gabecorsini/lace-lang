@@ -155,6 +155,12 @@ impl Env {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum LoopSignal {
+    Break,
+    Continue,
+}
+
 pub struct Interpreter {
     run_id: String,
     seq: u64,
@@ -169,6 +175,9 @@ pub struct Interpreter {
     module_members: HashMap<String, HashSet<String>>,
     loaded_modules: HashSet<String>,
     call_stack: Vec<CallFrame>,
+    loop_signal: Option<LoopSignal>,
+    return_value: Option<Value>,
+    variant_constructors: HashSet<String>,
 }
 
 impl Interpreter {
@@ -223,6 +232,9 @@ impl Interpreter {
             module_members: HashMap::new(),
             loaded_modules: HashSet::new(),
             call_stack: Vec::new(),
+            loop_signal: None,
+            return_value: None,
+            variant_constructors: HashSet::new(),
         }
     }
 
@@ -315,6 +327,27 @@ impl Interpreter {
                     self.tools
                         .insert(t.name.clone(), ToolDef { decl: t.clone() });
                     exported.insert(t.name.clone());
+                }
+                TopLevelItem::Enum(e) => {
+                    for variant in &e.variants {
+                        match &variant.body {
+                            None => {
+                                // Unit variant: register as a Value in global env
+                                self.env.define(
+                                    variant.name.clone(),
+                                    Value::Variant {
+                                        name: variant.name.clone(),
+                                        payload: vec![],
+                                    },
+                                );
+                            }
+                            Some(lace_ast::EnumVariantBody::Tuple(_)) => {
+                                // Tuple variant: register as a callable constructor
+                                self.variant_constructors.insert(variant.name.clone());
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -420,6 +453,11 @@ impl Interpreter {
                     return Ok(EvalFlow::Return(v));
                 }
             }
+            // Short-circuit on return/break/continue signals from sub-expressions
+            if self.return_value.is_some() || self.loop_signal.is_some() {
+                self.env.pop();
+                return Ok(EvalFlow::Value(Value::Unit));
+            }
         }
 
         let out = if let Some(tail) = &block.tail_expr {
@@ -457,7 +495,7 @@ impl Interpreter {
             Stmt::For(f) => {
                 let iter = self.eval_expr(&f.iter)?;
                 if let Value::List(items) = iter {
-                    for item in items {
+                    'for_loop: for item in items {
                         self.env.push();
                         self.env.define(f.name.clone(), item);
                         match self.eval_block(&f.body)? {
@@ -468,6 +506,14 @@ impl Interpreter {
                             }
                         }
                         self.env.pop();
+                        if self.return_value.is_some() {
+                            break 'for_loop;
+                        }
+                        match self.loop_signal.take() {
+                            Some(LoopSignal::Break) => break 'for_loop,
+                            Some(LoopSignal::Continue) => continue 'for_loop,
+                            None => {}
+                        }
                     }
                     Ok(EvalFlow::Value(Value::Unit))
                 } else {
@@ -488,6 +534,14 @@ impl Interpreter {
                         EvalFlow::Value(_) => {}
                         EvalFlow::Return(v) => return Ok(EvalFlow::Return(v)),
                     }
+                    if self.return_value.is_some() {
+                        break;
+                    }
+                    match self.loop_signal.take() {
+                        Some(LoopSignal::Break) => break,
+                        Some(LoopSignal::Continue) => {}
+                        None => {}
+                    }
                 }
                 Ok(EvalFlow::Value(Value::Unit))
             }
@@ -504,6 +558,14 @@ impl Interpreter {
                     Value::Unit
                 };
                 Ok(EvalFlow::Return(v))
+            }
+            Expr::Break { .. } => {
+                self.loop_signal = Some(LoopSignal::Break);
+                Ok(EvalFlow::Value(Value::Unit))
+            }
+            Expr::Continue { .. } => {
+                self.loop_signal = Some(LoopSignal::Continue);
+                Ok(EvalFlow::Value(Value::Unit))
             }
             _ => self.eval_expr(expr).map(EvalFlow::Value),
         }
@@ -533,7 +595,7 @@ impl Interpreter {
             }
             Expr::Block(b) => match self.eval_block(b)? {
                 EvalFlow::Value(v) => Ok(v),
-                EvalFlow::Return(v) => Ok(v),
+                EvalFlow::Return(v) => { self.return_value = Some(v); Ok(Value::Unit) }
             },
             Expr::If(i) => {
                 for (cond, block) in &i.branches {
@@ -541,14 +603,14 @@ impl Interpreter {
                     if as_bool(&cv) {
                         return match self.eval_block(block)? {
                             EvalFlow::Value(v) => Ok(v),
-                            EvalFlow::Return(v) => Ok(v),
+                            EvalFlow::Return(v) => { self.return_value = Some(v); Ok(Value::Unit) }
                         };
                     }
                 }
                 if let Some(else_block) = &i.else_block {
                     match self.eval_block(else_block)? {
                         EvalFlow::Value(v) => Ok(v),
-                        EvalFlow::Return(v) => Ok(v),
+                        EvalFlow::Return(v) => { self.return_value = Some(v); Ok(Value::Unit) }
                     }
                 } else {
                     Ok(Value::Unit)
@@ -762,6 +824,14 @@ impl Interpreter {
                     Ok(Value::Unit)
                 }
             }
+            Expr::Break { .. } => {
+                self.loop_signal = Some(LoopSignal::Break);
+                Ok(Value::Unit)
+            }
+            Expr::Continue { .. } => {
+                self.loop_signal = Some(LoopSignal::Continue);
+                Ok(Value::Unit)
+            }
             Expr::ErrorProp { expr, span } => {
                 let v = self.eval_expr(expr)?;
                 match v {
@@ -795,6 +865,14 @@ impl Interpreter {
         // tool declaration execution
         if self.tools.contains_key(name) {
             return self.call_tool(name, args, span);
+        }
+
+        // Enum tuple variant constructor
+        if self.variant_constructors.contains(name) {
+            return Ok(Value::Variant {
+                name: name.to_string(),
+                payload: args,
+            });
         }
 
         let resolved_name = self
@@ -852,7 +930,7 @@ impl Interpreter {
         };
 
         let out = match eval_result? {
-            EvalFlow::Value(v) => v,
+            EvalFlow::Value(v) => self.return_value.take().unwrap_or(v),
             EvalFlow::Return(v) => v,
         };
 
@@ -1989,6 +2067,13 @@ impl Interpreter {
                 _ => false,
             },
             Pattern::Ident(name, _) => {
+                // If the name refers to a known unit variant (uppercase, in env as Variant),
+                // treat it as a structural match rather than a wildcard binding.
+                if let Some(Value::Variant { name: vname, payload }) = self.env.get(name) {
+                    if payload.is_empty() {
+                        return matches!(value, Value::Variant { name: vn, .. } if vn == &vname);
+                    }
+                }
                 bindings.insert(name.clone(), value.clone());
                 true
             }

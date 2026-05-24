@@ -49,6 +49,8 @@ pub enum TokenKind {
     Else,
     Match,
     Return,
+    Break,
+    Continue,
     Retries,
     Timeout,
     Mock,

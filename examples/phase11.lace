@@ -1,0 +1,92 @@
+# Phase 11: break/continue/return, if/else if/else chains,
+# exhaustive match, and rich error messages.
+
+fn classify(n: Int) -> String [Pure] {
+    if n < 0 {
+        "negative"
+    } else if n == 0 {
+        "zero"
+    } else if n < 10 {
+        "small"
+    } else {
+        "large"
+    }
+}
+
+fn first_even_after_zero(limit: Int) -> Int [Mut] {
+    mut let i = 0
+    mut let found = -1
+    while i < limit {
+        if i % 2 == 0 && i > 0 {
+            found = i
+            break
+        }
+        i = i + 1
+    }
+    found
+}
+
+fn sum_odds(n: Int) -> Int [Mut] {
+    mut let total = 0
+    for x in List.range(0, n) {
+        if x % 2 == 0 {
+            continue
+        }
+        total = total + x
+    }
+    total
+}
+
+fn find_first_gt(limit: Int, threshold: Int) -> Int [Mut] {
+    for v in List.range(0, limit) {
+        if v > threshold {
+            return v
+        }
+    }
+    -1
+}
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn color_name(c: Color) -> String [Pure] {
+    match c {
+        Red   => "red",
+        Green => "green",
+        Blue  => "blue",
+    }
+}
+
+# Rich error example (intentional parse error, shown as a comment):
+#
+#   fn bad(
+#
+# would produce:
+#   examples/phase11.lace:N:M: error: expected type expression
+#     fn bad(
+#            (caret here)
+#
+# That is the Phase 11 rich-error format: filename:line:col + source line + caret.
+
+fn main() -> Unit [IO, Mut] {
+    println(classify(-3))
+    println(classify(0))
+    println(classify(7))
+    println(classify(42))
+
+    let fe = first_even_after_zero(100)
+    println(to_string(fe))
+
+    let s = sum_odds(10)
+    println(to_string(s))
+
+    let v = find_first_gt(20, 5)
+    println(to_string(v))
+
+    println(color_name(Red))
+    println(color_name(Green))
+    println(color_name(Blue))
+}

@@ -365,6 +365,12 @@ pub enum Expr {
         expr: Box<Expr>,
         span: Span,
     },
+    Break {
+        span: Span,
+    },
+    Continue {
+        span: Span,
+    },
 }
 
 impl Expr {
@@ -380,7 +386,9 @@ impl Expr {
             | Expr::Binary { span: s, .. }
             | Expr::Unary { span: s, .. }
             | Expr::Return { span: s, .. }
-            | Expr::ErrorProp { span: s, .. } => *s,
+            | Expr::ErrorProp { span: s, .. }
+            | Expr::Break { span: s }
+            | Expr::Continue { span: s } => *s,
             Expr::Block(b) => b.span,
             Expr::If(i) => i.span,
             Expr::Match(m) => m.span,
@@ -725,7 +733,7 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
                 v.visit_expr(vv);
             }
         }
-        Expr::Literal(_, _) | Expr::Ident(_, _) => {}
+        Expr::Literal(_, _) | Expr::Ident(_, _) | Expr::Break { .. } | Expr::Continue { .. } => {}
     }
 }
 
