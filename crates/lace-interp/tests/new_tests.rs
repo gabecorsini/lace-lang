@@ -956,3 +956,59 @@ fn test_str_repeat_and_char_at() {
     let r2 = run(r#"fn main() -> Unit [IO] { Str.char_at("hello", 1) }"#).unwrap();
     assert_eq!(r2, Value::String("e".into()));
 }
+
+// ── Closures and first-class functions ───────────────────────────────────────
+
+#[test]
+fn test_closure_basic() {
+    let src = r#"
+fn main() -> Int [Pure] {
+    let double = fn(x) { x * 2 }
+    double(5)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(10));
+}
+
+#[test]
+fn test_closure_capture() {
+    let src = r#"
+fn main() -> Int [Pure] {
+    let n = 10
+    let add_n = fn(x) { x + n }
+    add_n(5)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(15));
+}
+
+#[test]
+fn test_hof_apply() {
+    let src = r#"
+fn apply(f: Fn, x: Int) -> Int [Pure] {
+    f(x)
+}
+fn main() -> Int [Pure] {
+    apply(fn(x) { x * 3 }, 7)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(21));
+}
+
+#[test]
+fn test_return_closure() {
+    let src = r#"
+fn make_adder(n: Int) -> Fn [Pure] {
+    fn(x) { x + n }
+}
+fn main() -> Int [Pure] {
+    let add5 = make_adder(5)
+    add5(10)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(15));
+}

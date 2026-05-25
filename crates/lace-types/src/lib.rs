@@ -1244,6 +1244,9 @@ impl Checker {
         match (a, b) {
             (Type::Named(na, args_a), Type::Record(nb, _)) if na == nb && args_a.is_empty() => return true,
             (Type::Record(na, _), Type::Named(nb, args_b)) if na == nb && args_b.is_empty() => return true,
+            // Named("Fn",[]) is compatible with Fn(..) types and vice versa
+            (Type::Named(na, args_a), Type::Fn(_, _)) if na == "Fn" && args_a.is_empty() => return true,
+            (Type::Fn(_, _), Type::Named(nb, args_b)) if nb == "Fn" && args_b.is_empty() => return true,
             _ => {}
         }
         a == b
