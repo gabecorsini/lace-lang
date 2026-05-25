@@ -1,0 +1,11 @@
+fn fetch_item(id: Int) -> Int [Pure] {
+    id * 10
+}
+
+fn main() -> Unit [IO] {
+    let tasks = List.map([1, 2, 3, 4, 5], fn(id) { fn() { fetch_item(id) } })
+    let results = Async.all(tasks)
+    let handle = Async.spawn(fn() { 99 })
+    let val = Async.await_handle(handle)
+    let first = Async.race([fn() { 1 }, fn() { 2 }, fn() { 3 }])
+}

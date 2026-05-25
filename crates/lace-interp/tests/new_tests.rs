@@ -1395,3 +1395,36 @@ fn main() -> Result [IO] {
         _ => panic!("expected Ok"),
     }
 }
+
+#[test]
+fn test_async_all() {
+    let src = r#"
+fn main() -> List [IO] {
+    Async.all([fn() { 1 + 1 }, fn() { 2 + 2 }, fn() { 3 + 3 }])
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::List(vec![
+        Value::Int(2), Value::Int(4), Value::Int(6)
+    ]));
+}
+
+#[test]
+fn test_async_spawn_await() {
+    let src = r#"
+fn main() -> Int [IO] {
+    let handle = Async.spawn(fn() { 42 })
+    Async.await_handle(handle)
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(42));
+}
+
+#[test]
+fn test_async_race() {
+    let src = r#"
+fn main() -> Int [IO] {
+    Async.race([fn() { 1 }, fn() { 2 }, fn() { 3 }])
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(1));
+}

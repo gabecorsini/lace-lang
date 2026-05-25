@@ -275,6 +275,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Async".into(), Value::String("Async".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -329,6 +330,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Async".into(), Value::String("Async".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -2318,6 +2320,71 @@ impl Interpreter {
                     propagated_none: false,
                 }),
             },
+            // Async stdlib
+            "Async.all" => {
+                let fns = match args.to_vec().into_iter().next() {
+                    Some(Value::List(v)) => v,
+                    _ => return Err(RuntimeError {
+                        message: "Async.all expects a list".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let mut results = Vec::new();
+                for f in fns {
+                    let result = self.call_callable(f, vec![], Span::default())?;
+                    results.push(result);
+                }
+                Ok(Some(Value::List(results)))
+            }
+            "Async.race" => {
+                let fns = match args.to_vec().into_iter().next() {
+                    Some(Value::List(v)) => v,
+                    _ => return Err(RuntimeError {
+                        message: "Async.race expects a list".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                if fns.is_empty() {
+                    return Err(RuntimeError {
+                        message: "Async.race called with empty list".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    });
+                }
+                let result = self.call_callable(fns.into_iter().next().unwrap(), vec![], Span::default())?;
+                Ok(Some(result))
+            }
+            "Async.spawn" => {
+                let f = match args.first() {
+                    Some(v) => v.clone(),
+                    None => return Err(RuntimeError {
+                        message: "Async.spawn expects a function".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let result = self.call_callable(f, vec![], Span::default())?;
+                Ok(Some(Value::Variant { name: "Handle".into(), payload: vec![result] }))
+            }
+            "Async.await_handle" => {
+                match args.first() {
+                    Some(Value::Variant { name, payload }) if name == "Handle" => {
+                        Ok(Some(payload.first().cloned().unwrap()))
+                    }
+                    _ => Err(RuntimeError {
+                        message: "Async.await_handle expects a Handle".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                }
+            }
             // Json stdlib
             "Json.parse" => match args.first() {
                 Some(Value::String(s)) => {

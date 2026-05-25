@@ -482,6 +482,12 @@ impl Checker {
         self.fn_sigs.insert("Regex.replace_all".into(), (vec![Type::String, Type::String, Type::String], Type::String));
         self.fn_sigs.insert("Regex.captures".into(), (vec![Type::String, Type::String], Type::Dynamic));
         self.fn_sigs.insert("Json.validate".into(), (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic));
+        // Async stdlib
+        self.scopes[0].vars.insert("Async".into(), Type::Dynamic);
+        self.fn_sigs.insert("Async.all".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs.insert("Async.race".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs.insert("Async.spawn".into(), (vec![Type::Dynamic], Type::Dynamic));
+        self.fn_sigs.insert("Async.await_handle".into(), (vec![Type::Dynamic], Type::Dynamic));
         // Env stdlib
         self.scopes[0].vars.insert("Env".into(), Type::Dynamic);
         self.fn_sigs.insert(
