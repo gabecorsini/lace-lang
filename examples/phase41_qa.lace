@@ -1,0 +1,20 @@
+# Phase 41 QA: tool keyword with body, effect enforcement, JSON logging
+
+# Tool declaration with a Lace body
+tool greet_user(name: String) -> String {
+  "Hello, ${name}!"
+}
+
+let msg = greet_user("Lace")
+assert_eq(msg, "Hello, Lace!")
+
+# Tool doing IO
+tool read_tmp() -> Result<String, String> {
+  File.write("/tmp/lace_tool_test.txt", "tool works")?
+  File.read("/tmp/lace_tool_test.txt")
+}
+
+let content = read_tmp()
+assert_eq(content, Ok("tool works"))
+
+print("phase41 assertions passed")

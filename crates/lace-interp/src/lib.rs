@@ -4279,8 +4279,59 @@ impl Interpreter {
             return Ok(parsed);
         }
 
+        // Execute Lace body if present
+        if let Some(body) = tool.decl.body.clone() {
+            // Push a call frame with IO effects so the body can call IO stdlib
+            self.call_stack.push(CallFrame {
+                effects: vec![EffectExpr::Builtin(EffectTag::Io)],
+            });
+            self.env.push();
+            for (p, a) in tool.decl.params.iter().zip(args.iter()) {
+                self.env.define(p.name.clone(), a.clone());
+            }
+            let eval_result = self.eval_block(&body);
+            self.env.pop();
+            self.call_stack.pop();
+
+            // Handle propagated Err/None from `?` operator
+            let eval_result = match eval_result {
+                Err(RuntimeError { propagated_err: Some(err_val), .. }) => {
+                    let out = Value::Variant {
+                        name: "Err".into(),
+                        payload: vec![err_val],
+                    };
+                    let duration_ms = started.elapsed().as_millis() as u64;
+                    let err_str = display_value(&out);
+                    self.tool_logger.log_err(tool_name, &err_str, duration_ms);
+                    return Ok(out);
+                }
+                Err(RuntimeError { propagated_none: true, .. }) => {
+                    let out = Value::Variant { name: "None".into(), payload: vec![] };
+                    let duration_ms = started.elapsed().as_millis() as u64;
+                    self.tool_logger.log_ok(tool_name, duration_ms);
+                    return Ok(out);
+                }
+                other => other,
+            };
+
+            let out = match eval_result? {
+                EvalFlow::Value(v) => self.return_value.take().unwrap_or(v),
+                EvalFlow::Return(v) => v,
+            };
+
+            let duration_ms = started.elapsed().as_millis() as u64;
+            let is_err = matches!(&out, Value::Variant { name, .. } if name == "Err");
+            if is_err {
+                let err_str = display_value(&out);
+                self.tool_logger.log_err(tool_name, &err_str, duration_ms);
+            } else {
+                self.tool_logger.log_ok(tool_name, duration_ms);
+            }
+            return Ok(out);
+        }
+
         let placeholder = placeholder_for_type(&tool.decl.ret_ty);
-        eprintln!("[lace] W: tool '{}' has no dispatch annotation (@http/@shell/mock) — returning stub", tool_name);
+        eprintln!("[lace] W: tool '{}' has no dispatch annotation (@http/@shell/mock) and no body — returning stub", tool_name);
         self.log_effect(
             tool_name,
             effect_tag,
