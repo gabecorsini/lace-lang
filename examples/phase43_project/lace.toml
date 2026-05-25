@@ -1,0 +1,4 @@
+[package]
+name = "phase43_project"
+version = "0.1.0"
+entry = "src/main.lace"

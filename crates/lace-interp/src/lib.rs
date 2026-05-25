@@ -354,6 +354,7 @@ impl Interpreter {
         self.env.define("Async".into(), Value::String("Async".into()));
 
         self.load_imports(program)?;
+        self.load_uses(program)?;
         self.register_items(program);
 
         // execute top-level consts as bindings
@@ -409,6 +410,7 @@ impl Interpreter {
         self.env.define("Async".into(), Value::String("Async".into()));
 
         self.load_imports(program)?;
+        self.load_uses(program)?;
         self.register_items(program);
 
         // execute top-level consts as bindings
@@ -501,6 +503,219 @@ impl Interpreter {
         for import in &program.imports {
             self.load_module_from_import(&base_dir, import)?;
         }
+
+        Ok(())
+    }
+
+    fn load_uses(&mut self, program: &Program) -> Result<(), RuntimeError> {
+        let Some(base_dir) = self.current_dir.clone() else {
+            return Ok(());
+        };
+
+        for use_decl in &program.uses {
+            self.load_module_from_use(&base_dir, use_decl)?;
+        }
+
+        Ok(())
+    }
+
+    fn load_module_from_use(
+        &mut self,
+        base_dir: &Path,
+        use_decl: &UseDecl,
+    ) -> Result<(), RuntimeError> {
+        // Convert dotted path to filesystem path: net.http_tools -> net/http_tools.lace
+        let rel_path: PathBuf = use_decl.path.iter().collect::<PathBuf>().with_extension("lace");
+
+        // Try relative to current file's directory first
+        let candidate = base_dir.join(&rel_path);
+
+        // Also find project root (lace.toml) for absolute resolution
+        let module_path = if candidate.exists() {
+            candidate
+        } else {
+            // Walk up looking for lace.toml
+            let mut dir = base_dir.to_path_buf();
+            let mut found = None;
+            loop {
+                if dir.join("lace.toml").exists() {
+                    let proj_candidate = dir.join("src").join(&rel_path);
+                    if proj_candidate.exists() {
+                        found = Some(proj_candidate);
+                    } else {
+                        let proj_candidate2 = dir.join(&rel_path);
+                        if proj_candidate2.exists() {
+                            found = Some(proj_candidate2);
+                        }
+                    }
+                    break;
+                }
+                if !dir.pop() { break; }
+            }
+            found.ok_or_else(|| RuntimeError {
+                message: format!(
+                    "use '{}': file not found (tried '{}')",
+                    use_decl.path.join("."),
+                    base_dir.join(&rel_path).display()
+                ),
+                span: Some(use_decl.span),
+                propagated_err: None,
+                propagated_none: false,
+            })?
+        };
+
+        let canonical = module_path.canonicalize().map_err(|e| RuntimeError {
+            message: format!(
+                "use '{}': cannot resolve '{}': {e}",
+                use_decl.path.join("."),
+                module_path.display()
+            ),
+            span: Some(use_decl.span),
+            propagated_err: None,
+            propagated_none: false,
+        })?;
+
+        // Module name = last path segment (or alias)
+        let module_name = use_decl.alias.clone().unwrap_or_else(|| {
+            use_decl.path.last().cloned().unwrap_or_default()
+        });
+
+        let canon_str = canonical.to_string_lossy().to_string();
+
+        // Dedup: skip if already loaded
+        if self.loaded_modules.contains(&canon_str) {
+            self.env.define(module_name.clone(), Value::String(module_name.clone()));
+            return Ok(());
+        }
+
+        // Circular import detection
+        if self.loading_stack.contains(&canonical) {
+            let cycle: Vec<String> = self
+                .loading_stack
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            return Err(RuntimeError {
+                message: format!(
+                    "circular import: {} -> {}",
+                    cycle.join(" -> "),
+                    use_decl.path.join(".")
+                ),
+                span: Some(use_decl.span),
+                propagated_err: None,
+                propagated_none: false,
+            });
+        }
+
+        let source = fs::read_to_string(&canonical).map_err(|e| RuntimeError {
+            message: format!(
+                "use '{}': cannot read file '{}': {e}",
+                use_decl.path.join("."),
+                canonical.display()
+            ),
+            span: Some(use_decl.span),
+            propagated_err: None,
+            propagated_none: false,
+        })?;
+
+        let (parsed, parse_errors) = lace_parser::parse_program(&source);
+        if !parse_errors.is_empty() {
+            let joined = parse_errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(RuntimeError {
+                message: format!(
+                    "parse error in module '{}': {}",
+                    use_decl.path.join("."),
+                    joined
+                ),
+                span: Some(use_decl.span),
+                propagated_err: None,
+                propagated_none: false,
+            });
+        }
+
+        let program = parsed.ok_or_else(|| RuntimeError {
+            message: format!("failed to parse module '{}'", use_decl.path.join(".")),
+            span: Some(use_decl.span),
+            propagated_err: None,
+            propagated_none: false,
+        })?;
+
+        self.loaded_modules.insert(canon_str.clone());
+        self.loading_stack.push(canonical.clone());
+
+        let prev_module = self.module_name.clone();
+        let prev_dir = self.current_dir.clone();
+        self.module_name = canon_str.clone();
+        self.current_dir = canonical.parent().map(Path::to_path_buf);
+
+        // Recursively load this module's own imports/uses
+        self.load_imports(&program)?;
+        self.load_uses(&program)?;
+
+        // Register all items under their bare names (so they work inside the module)
+        self.register_items(&program);
+
+        // Register only pub items under "<alias>.<name>"
+        let alias = module_name.clone();
+        for item in &program.items {
+            match item {
+                TopLevelItem::Function(f) if f.is_pub => {
+                    let qualified = format!("{}.{}", alias, f.name);
+                    // Function was registered under "<canon_str>.<name>" by register_items
+                    let canon_key = format!("{}.{}", canon_str, f.name);
+                    let def = self.functions.get(&canon_key)
+                        .or_else(|| self.functions.get(&f.name))
+                        .cloned();
+                    if let Some(def) = def {
+                        self.functions.insert(qualified, def);
+                    }
+                }
+                TopLevelItem::Tool(t) if t.is_pub => {
+                    let qualified = format!("{}.{}", alias, t.name);
+                    let def = self.tools.get(&t.name).cloned();
+                    if let Some(def) = def {
+                        self.tools.insert(qualified, def);
+                    }
+                }
+                TopLevelItem::Enum(e) => {
+                    for variant in &e.variants {
+                        let qualified_variant = format!("{}.{}", alias, variant.name);
+                        self.variant_constructors.insert(qualified_variant.clone());
+                        if let Some(v) = self.env.get(&variant.name) {
+                            self.env.define(qualified_variant, v);
+                        }
+                    }
+                }
+                TopLevelItem::Record(r) => {
+                    let qualified = format!("{}.{}", alias, r.name);
+                    if let Some(v) = self.env.get(&r.name) {
+                        self.env.define(qualified, v);
+                    }
+                }
+                TopLevelItem::Const(c) => {
+                    let qualified = format!("{}.{}", alias, c.name);
+                    let v = if let Some(v) = self.env.get(&c.name) {
+                        Some(v)
+                    } else {
+                        self.eval_expr(&c.expr).ok()
+                    };
+                    if let Some(v) = v {
+                        self.env.define(qualified, v);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.loading_stack.pop();
+        self.current_dir = prev_dir;
+        self.module_name = prev_module;
+
+        self.env.define(module_name.clone(), Value::String(module_name.clone()));
 
         Ok(())
     }
@@ -929,6 +1144,9 @@ impl Interpreter {
                     let fn_name = format!("{}.{}", module_name, call.method);
                     if self.functions.contains_key(&fn_name) {
                         return self.call_function(&fn_name.clone(), args, call.span);
+                    }
+                    if self.tools.contains_key(&fn_name) {
+                        return self.call_tool(&fn_name.clone(), args, call.span);
                     }
                 }
                 self.call_method(target, &call.method, args, call.span)

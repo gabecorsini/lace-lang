@@ -277,6 +277,7 @@ impl<'a> Lexer<'a> {
             "in" => TokenKind::In,
             "while" => TokenKind::While,
             "pure" => TokenKind::Pure,
+            "pub" => TokenKind::Pub,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,
             "match" => TokenKind::Match,

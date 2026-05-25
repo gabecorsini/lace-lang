@@ -46,6 +46,7 @@ pub enum TokenKind {
     In,
     While,
     Pure,
+    Pub,
     If,
     Else,
     Match,

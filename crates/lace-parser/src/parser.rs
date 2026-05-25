@@ -129,7 +129,13 @@ impl Parser {
     fn parse_use_decl(&mut self) -> Option<UseDecl> {
         let start = self.expect(TokenKind::Use)?.span.start;
         let path = self.parse_module_path()?;
-        let imports = if self.match_tok(&TokenKind::Dot) {
+        // Check for `as alias` (for file-based module imports)
+        let alias = if self.match_tok(&TokenKind::As) {
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+        let imports = if !alias.is_some() && self.match_tok(&TokenKind::Dot) {
             self.expect(TokenKind::LBrace)?;
             let mut names = Vec::new();
             loop {
@@ -151,6 +157,7 @@ impl Parser {
         Some(UseDecl {
             path,
             imports,
+            alias,
             span: Span { start, end },
         })
     }
@@ -174,9 +181,11 @@ impl Parser {
     fn parse_top_level_item(&mut self) -> Option<TopLevelItem> {
         let doc = self.collect_doc_comment();
         let ann = self.parse_annotations();
+        // Check for `pub` visibility modifier
+        let is_pub = self.match_tok(&TokenKind::Pub);
         match self.peek_kind() {
-            TokenKind::Fn => self.parse_fn_decl(doc, ann).map(TopLevelItem::Function),
-            TokenKind::Tool => self.parse_tool_decl(doc, ann).map(TopLevelItem::Tool),
+            TokenKind::Fn => self.parse_fn_decl(doc, ann, is_pub).map(TopLevelItem::Function),
+            TokenKind::Tool => self.parse_tool_decl(doc, ann, is_pub).map(TopLevelItem::Tool),
             TokenKind::Record => self.parse_record_decl(doc).map(TopLevelItem::Record),
             TokenKind::Enum => self.parse_enum_decl().map(TopLevelItem::Enum),
             TokenKind::Type => self.parse_type_alias().map(TopLevelItem::TypeAlias),
@@ -217,7 +226,7 @@ impl Parser {
         }
     }
 
-    fn parse_fn_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>) -> Option<FnDecl> {
+    fn parse_fn_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>, is_pub: bool) -> Option<FnDecl> {
         let start = self.expect(TokenKind::Fn)?.span.start;
         let name = self.expect_ident()?;
         let generics = self.parse_generic_params();
@@ -260,6 +269,7 @@ impl Parser {
         Some(FnDecl {
             doc_comment,
             annotations,
+            is_pub,
             name,
             generics,
             params,
@@ -270,7 +280,7 @@ impl Parser {
         })
     }
 
-    fn parse_tool_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>) -> Option<ToolDecl> {
+    fn parse_tool_decl(&mut self, doc_comment: Option<String>, annotations: Vec<Annotation>, is_pub: bool) -> Option<ToolDecl> {
         let start = self.expect(TokenKind::Tool)?.span.start;
         let name = self.expect_ident()?;
         self.expect(TokenKind::LParen)?;
@@ -358,6 +368,7 @@ impl Parser {
         Some(ToolDecl {
             doc_comment,
             annotations,
+            is_pub,
             name,
             params,
             ret_ty,
@@ -724,6 +735,9 @@ impl Parser {
     }
 
     fn parse_effect_ann(&mut self) -> Option<Vec<EffectExpr>> {
+        if !self.at(&TokenKind::LBracket) {
+            return Some(Vec::new());
+        }
         self.expect(TokenKind::LBracket)?;
         let mut effects = Vec::new();
         if !self.at(&TokenKind::RBracket) {
@@ -1967,6 +1981,7 @@ impl Parser {
                 | (Type, Type)
                 | (Const, Const)
                 | (Extern, Extern)
+                | (Pub, Pub)
                 | (From, From)
                 | (As, As)
                 | (Let, Let)

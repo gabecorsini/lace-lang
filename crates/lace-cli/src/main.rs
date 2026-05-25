@@ -27,6 +27,7 @@ struct LaceManifest {
 struct PackageManifest {
     name: String,
     version: String,
+    entry: Option<String>,
 }
 
 /// Walk upward from `start` looking for a lace.toml.
@@ -447,12 +448,17 @@ fn resolve_entrypoint(
 
     let cwd = std::env::current_dir().context("failed to get current directory")?;
     if let Some((root, manifest)) = find_manifest(&cwd) {
-        let entry = root.join("src").join("main.lace");
+        let entry = if let Some(e) = manifest.package.entry.as_deref() {
+            root.join(e)
+        } else {
+            root.join("src").join("main.lace")
+        };
         if !entry.exists() {
             anyhow::bail!(
-                "lace.toml found at {} but src/main.lace does not exist.\n\
-                 Run `lace new {}` to scaffold a new project, or create src/main.lace manually.",
+                "lace.toml found at {} but entry '{}' does not exist.\n\
+                 Run `lace new {}` to scaffold a new project, or create the entry file manually.",
                 root.display(),
+                entry.display(),
                 manifest.package.name
             );
         }

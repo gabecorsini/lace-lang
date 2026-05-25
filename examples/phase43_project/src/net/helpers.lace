@@ -1,0 +1,3 @@
+pub tool ping(url: String) -> Result<String, String> {
+    Ok("pong: ${url}")
+}

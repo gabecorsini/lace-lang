@@ -24,6 +24,7 @@ pub struct ModuleDecl {
 pub struct UseDecl {
     pub path: Vec<String>,
     pub imports: Option<Vec<String>>,
+    pub alias: Option<String>,
     pub span: Span,
 }
 
@@ -88,6 +89,7 @@ pub enum DurationUnit {
 pub struct FnDecl {
     pub doc_comment: Option<String>,
     pub annotations: Vec<Annotation>,
+    pub is_pub: bool,
     pub name: String,
     pub generics: Vec<GenericParam>,
     pub params: Vec<Param>,
@@ -101,6 +103,7 @@ pub struct FnDecl {
 pub struct ToolDecl {
     pub doc_comment: Option<String>,
     pub annotations: Vec<Annotation>,
+    pub is_pub: bool,
     pub name: String,
     pub params: Vec<ToolParam>,
     pub ret_ty: TypeExpr,

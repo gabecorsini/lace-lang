@@ -1,0 +1,13 @@
+use math_utils
+use net.helpers
+
+let sum = math_utils.add(3, 4)
+assert_eq(sum, 7)
+
+let prod = math_utils.mul(3, 4)
+assert_eq(prod, 12)
+
+let r = helpers.ping("https://example.com")
+assert_eq(r, Ok("pong: https://example.com"))
+
+print("Phase 43 OK")
