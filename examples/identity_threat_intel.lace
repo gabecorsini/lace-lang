@@ -1,0 +1,95 @@
+# identity_threat_intel.lace
+# Port of identity_threat_intel_digest.py (Lace version)
+
+fn strip_tags(s: String) -> String [Pure] {
+  Regex.replace_all("<[^>]+>", s, "")
+}
+
+fn decode_entities(s: String) -> String [Pure] {
+  let s = Regex.replace_all("&amp;", s, "&")
+  let s = Regex.replace_all("&lt;", s, "<")
+  let s = Regex.replace_all("&gt;", s, ">")
+  let s = Regex.replace_all("&quot;", s, "\"")
+  let s = Regex.replace_all("&#39;", s, "'")
+  let s = Regex.replace_all("&nbsp;", s, " ")
+  let s = Regex.replace_all("<!\\[CDATA\\[", s, "")
+  Regex.replace_all("\\]\\]>", s, "")
+}
+
+fn extract_tag(tag: String, block: String) -> String [Pure] {
+  let open_t = "<" ++ tag ++ ">"
+  let close_t = "</" ++ tag ++ ">"
+  let hits = Regex.find_all(open_t ++ "([^<]*)" ++ close_t, block)
+  let hit = List.get(hits, 0)
+  match hit {
+    Some(raw) => {
+      let inner = Regex.replace_all(open_t, raw, "")
+      let inner = Regex.replace_all(close_t, inner, "")
+      decode_entities(strip_tags(inner)).trim()
+    },
+    None => "",
+  }
+}
+
+fn score_hay(hay: String) -> Int [Pure] {
+  let s = 0
+  let s = if Regex.is_match("microsoft entra", hay) { s + 10 } else { s }
+  let s = if Regex.is_match("entra id", hay) { s + 10 } else { s }
+  let s = if Regex.is_match("azure ad", hay) { s + 8 } else { s }
+  let s = if Regex.is_match("conditional access", hay) { s + 8 } else { s }
+  let s = if Regex.is_match("oauth", hay) { s + 7 } else { s }
+  let s = if Regex.is_match("\\boidc\\b", hay) { s + 7 } else { s }
+  let s = if Regex.is_match("\\bsaml\\b", hay) { s + 7 } else { s }
+  let s = if Regex.is_match("\\bsso\\b", hay) { s + 6 } else { s }
+  let s = if Regex.is_match("\\bmfa\\b", hay) { s + 6 } else { s }
+  let s = if Regex.is_match("\\bpim\\b", hay) { s + 6 } else { s }
+  let s = if Regex.is_match("privileged identity", hay) { s + 6 } else { s }
+  let s = if Regex.is_match("\\bpasswordless\\b", hay) { s + 5 } else { s }
+  let s = if Regex.is_match("account takeover", hay) { s + 5 } else { s }
+  let s = if Regex.is_match("zero trust", hay) { s + 5 } else { s }
+  let s = if Regex.is_match("\\bauthentication\\b", hay) { s + 4 } else { s }
+  let s = if Regex.is_match("\\bauthorization\\b", hay) { s + 4 } else { s }
+  let s = if Regex.is_match("\\bidentity\\b", hay) { s + 4 } else { s }
+  let s = if Regex.is_match("\\btoken\\b", hay) { s + 4 } else { s }
+  let s = if Regex.is_match("\\bcredential\\b", hay) { s + 4 } else { s }
+  let s = if Regex.is_match("\\bphishing\\b", hay) { s + 3 } else { s }
+  s
+}
+
+fn process_feed(url: String, source: String) -> String [IO] {
+  let resp = Http.get(url)
+  match resp {
+    Err(e) => "",
+    Ok(xml) => {
+      let blocks = Regex.find_all("(?s)<item>.*?</item>", xml)
+      let results = List.filter_map(blocks, fn(block) {
+        let title = extract_tag("title", block)
+        let link = extract_tag("link", block)
+        let hay = (title ++ " " ++ extract_tag("description", block)).to_lower()
+        let score = score_hay(hay)
+        if score >= 6 {
+          Some("[" ++ source ++ "] " ++ title ++ "\n" ++ link ++ "\nScore: " ++ to_string(score))
+        } else {
+          None()
+        }
+      })
+      List.join(results, "\n\n")
+    },
+  }
+}
+
+fn main() -> String [IO] {
+  let thn  = process_feed("https://thehackernews.com/feeds/posts/default?alt=rss", "THN")
+  let msrc = process_feed("https://api.msrc.microsoft.com/update-guide/rss", "MSRC")
+  let dark = process_feed("https://www.darkreading.com/rss.xml", "DarkReading")
+
+  let parts = List.filter_map([thn, msrc, dark], fn(s) {
+    if s != "" { Some(s) } else { None() }
+  })
+
+  if List.length(parts) == 0 {
+    "[SILENT] No new identity-relevant items found."
+  } else {
+    "IDENTITY THREAT INTEL DIGEST\n============================\n\n" ++ List.join(parts, "\n\n---\n\n")
+  }
+}

@@ -1891,12 +1891,60 @@ impl Interpreter {
                 }
                 _ => Err(RuntimeError {
                     message: "List.get expects (List, Int)".into(),
+                   span: None,
+                   propagated_err: None,
+               propagated_none: false,
+               }),
+           },
+            "List.join" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::String(sep))) => {
+                    let parts: Vec<String> = items.iter().map(|v| match v {
+                        Value::String(s) => s.clone(),
+                        other => format!("{:?}", other),
+                    }).collect();
+                    Ok(Some(Value::String(parts.join(sep))))
+                }
+                _ => Err(RuntimeError {
+                    message: "List.join expects (List, String)".into(),
                     span: None,
                     propagated_err: None,
-                propagated_none: false,
+                    propagated_none: false,
                 }),
             },
-            // Map stdlib
+            "List.filter_map" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.filter_map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut out = Vec::new();
+                    for item in items {
+                        let result = self.call_callable(callable.clone(), vec![item.clone()], Span::default())?;
+                        match result {
+                            Value::Variant { ref name, ref payload } if name == "Some" => {
+                                if let Some(inner) = payload.first() {
+                                    out.push(inner.clone());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.filter_map expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    })
+                }
+            }
+           // Map stdlib
             "Map.new" => Ok(Some(Value::Map(HashMap::new()))),
             "Map.insert" => match (args.first(), args.get(1), args.get(2)) {
                 (Some(Value::Map(m)), Some(Value::String(key)), Some(val)) => {

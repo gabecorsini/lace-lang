@@ -331,6 +331,14 @@ impl Checker {
             "List.max".into(),
             (vec![Type::List(Box::new(Type::Dynamic))], Type::Dynamic),
         );
+        self.fn_sigs.insert(
+            "List.join".into(),
+            (vec![Type::List(Box::new(Type::Dynamic)), Type::String], Type::String),
+        );
+        self.fn_sigs.insert(
+            "List.filter_map".into(),
+            (vec![Type::List(Box::new(Type::Dynamic)), Type::Dynamic], Type::List(Box::new(Type::Dynamic))),
+        );
         // Map stdlib
         self.fn_sigs.insert(
             "Map.new".into(),
