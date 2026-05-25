@@ -1091,3 +1091,92 @@ fn main() -> Float [Pure] {
     let result = run(src).unwrap();
     assert_eq!(result, Value::Float(25.0));
 }
+
+#[test]
+fn test_try_ok_unwraps() {
+    let src = r#"
+fn safe_div(a: Int, b: Int) -> Result [Pure] {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+fn main() -> Result [Pure] {
+    let x = safe_div(10, 2)?
+    Ok(x)
+}
+"#;
+    let result = run(src).unwrap();
+    match result {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Ok");
+            assert_eq!(payload[0], Value::Int(5));
+        }
+        _ => panic!("expected Ok variant"),
+    }
+}
+
+#[test]
+fn test_try_err_propagates() {
+    let src = r#"
+fn safe_div(a: Int, b: Int) -> Result [Pure] {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+fn main() -> Result [Pure] {
+    let x = safe_div(10, 0)?
+    Ok(x)
+}
+"#;
+    let result = run(src).unwrap();
+    match result {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Err");
+            assert_eq!(payload[0], Value::String("division by zero".into()));
+        }
+        _ => panic!("expected Err variant"),
+    }
+}
+
+#[test]
+fn test_try_some_unwraps() {
+    let src = r#"
+fn find_first(lst: List) -> Option [Pure] {
+    List.get(lst, 0)
+}
+fn main() -> Option [Pure] {
+    let x = find_first([42, 1, 2])?
+    Some(x)
+}
+"#;
+    let result = run(src).unwrap();
+    match result {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Some");
+            assert_eq!(payload[0], Value::Int(42));
+        }
+        _ => panic!("expected Some variant"),
+    }
+}
+
+#[test]
+fn test_try_none_propagates() {
+    let src = r#"
+fn find_first(lst: List) -> Option [Pure] {
+    List.get(lst, 0)
+}
+fn main() -> Option [Pure] {
+    let x = find_first([])?
+    Some(x)
+}
+"#;
+    let result = run(src).unwrap();
+    match result {
+        Value::Variant { name, .. } => assert_eq!(name, "None"),
+        _ => panic!("expected None variant"),
+    }
+}

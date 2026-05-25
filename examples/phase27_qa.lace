@@ -1,0 +1,18 @@
+fn safe_div(a: Int, b: Int) -> Result [Pure] {
+    if b == 0 {
+        Err("division by zero")
+    } else {
+        Ok(a / b)
+    }
+}
+
+fn compute(a: Int, b: Int, c: Int) -> Result [Pure] {
+    let x = safe_div(a, b)?
+    let y = safe_div(x, c)?
+    Ok(y)
+}
+
+fn main() -> Unit [IO] {
+    let good = compute(100, 5, 4)
+    let bad = compute(100, 0, 4)
+}

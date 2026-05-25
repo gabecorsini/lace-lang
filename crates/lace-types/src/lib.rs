@@ -1064,6 +1064,8 @@ impl Checker {
                 .unwrap_or(Type::Unit),
             Expr::ErrorProp { expr, .. } => match self.infer_expr(expr) {
                 Type::Result(ok, _err) => *ok,
+                // Named("Result", []) — bare Result return type without type params
+                Type::Named(name, _) if name == "Result" || name == "Option" => Type::Dynamic,
                 other => other,
             },
             Expr::Break { .. } | Expr::Continue { .. } => Type::Unit,

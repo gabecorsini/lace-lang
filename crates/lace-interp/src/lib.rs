@@ -46,6 +46,9 @@ pub struct RuntimeError {
     /// When Some, this error was produced by the `?` operator propagating an Err value.
     /// call_function catches this and returns Ok(Err(v)) instead of propagating the error.
     pub propagated_err: Option<Value>,
+    /// When true, this error was produced by the `?` operator propagating a None value.
+    /// call_function catches this and returns Ok(None) instead of propagating the error.
+    pub propagated_none: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -434,6 +437,7 @@ impl Interpreter {
             ),
             span: Some(import.span),
             propagated_err: None,
+                propagated_none: false,
         })?;
 
         // Dedup: skip if already loaded.
@@ -460,6 +464,7 @@ impl Interpreter {
                 ),
                 span: Some(import.span),
                 propagated_err: None,
+                propagated_none: false,
             });
         }
 
@@ -471,6 +476,7 @@ impl Interpreter {
             ),
             span: Some(import.span),
             propagated_err: None,
+                propagated_none: false,
         })?;
 
         let (parsed, parse_errors) = lace_parser::parse_program(&source);
@@ -488,6 +494,7 @@ impl Interpreter {
                 ),
                 span: Some(import.span),
                 propagated_err: None,
+                propagated_none: false,
             });
         }
 
@@ -498,6 +505,7 @@ impl Interpreter {
             ),
             span: Some(import.span),
             propagated_err: None,
+                propagated_none: false,
         })?;
 
         self.loaded_modules.insert(canon_str.clone());
@@ -635,6 +643,7 @@ impl Interpreter {
                         message: format!("unknown variable '{}'", s.name),
                         span: Some(s.span),
                         propagated_err: None,
+                propagated_none: false,
                     });
                 }
                 Ok(EvalFlow::Value(Value::Unit))
@@ -669,6 +678,7 @@ impl Interpreter {
                         message: "for-loop requires a list iterator".into(),
                         span: Some(f.span),
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -738,6 +748,7 @@ impl Interpreter {
                         message: format!("unknown identifier '{}'", name),
                         span: Some(*span),
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -781,6 +792,7 @@ impl Interpreter {
                     message: "non-exhaustive match at runtime".into(),
                     span: Some(m.span),
                     propagated_err: None,
+                propagated_none: false,
                 })
             }
             Expr::FnCall(call) => {
@@ -800,6 +812,7 @@ impl Interpreter {
                                 message: format!("unknown function '{}'", call.name),
                                 span: Some(call.span),
                                 propagated_err: None,
+                propagated_none: false,
                             });
                     }
                 }
@@ -848,6 +861,7 @@ impl Interpreter {
                             ),
                             span: Some(*span),
                             propagated_err: None,
+                propagated_none: false,
                         })
                     }
                     Value::Record { fields, .. } => {
@@ -855,12 +869,14 @@ impl Interpreter {
                             message: format!("missing field '{}'", field),
                             span: Some(*span),
                             propagated_err: None,
+                propagated_none: false,
                         })
                     }
                     _ => Err(RuntimeError {
                         message: "field access on non-record value".into(),
                         span: Some(*span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -879,6 +895,7 @@ impl Interpreter {
                             message: format!("list index {} out of bounds", idx),
                             span: Some(*span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     (Value::Tuple(items), Value::Int(idx)) => items
                         .get(idx as usize)
@@ -887,11 +904,13 @@ impl Interpreter {
                             message: format!("tuple index {} out of bounds", idx),
                             span: Some(*span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     _ => Err(RuntimeError {
                         message: "indexing requires list/tuple and int index".into(),
                         span: Some(*span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -923,6 +942,7 @@ impl Interpreter {
                         message: "pipeline RHS must be callable".into(),
                         span: Some(*span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -946,6 +966,7 @@ impl Interpreter {
                             message: "unary '-' requires int or float".into(),
                             span: Some(*span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     },
                     UnaryOp::Not => Ok(Value::Bool(!as_bool(&v))),
@@ -1013,6 +1034,18 @@ impl Interpreter {
                             message: format!("error propagation: {:?}", payload[0]),
                             span: Some(*span),
                             propagated_err: Some(payload[0].clone()),
+                            propagated_none: false,
+                        })
+                    }
+                    Value::Variant { name, payload } if name == "Some" && payload.len() == 1 => {
+                        Ok(payload[0].clone())
+                    }
+                    Value::Variant { name, payload } if name == "None" && payload.is_empty() => {
+                        Err(RuntimeError {
+                            message: "none propagation".into(),
+                            span: Some(*span),
+                            propagated_err: None,
+                            propagated_none: true,
                         })
                     }
                     other => Ok(other),
@@ -1056,6 +1089,7 @@ impl Interpreter {
                 message: format!("unknown function '{}'", name),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             })?;
 
         let f = self
@@ -1066,6 +1100,7 @@ impl Interpreter {
                 message: format!("unknown function '{}'", name),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             })?;
 
         if f.params.len() != args.len() {
@@ -1078,6 +1113,7 @@ impl Interpreter {
                 ),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             });
         }
 
@@ -1146,6 +1182,12 @@ impl Interpreter {
                     payload: vec![err_val],
                 });
             }
+            Err(RuntimeError { propagated_none: true, .. }) => {
+                return Ok(Value::Variant {
+                    name: "None".into(),
+                    payload: vec![],
+                });
+            }
             other => other,
         };
 
@@ -1168,6 +1210,7 @@ impl Interpreter {
                 message: format!("value is not callable: {}", display_value(&other)),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             }),
         }
     }
@@ -1189,6 +1232,7 @@ impl Interpreter {
                 ),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             });
         }
         self.env.push();
@@ -1208,6 +1252,12 @@ impl Interpreter {
                 return Ok(Value::Variant {
                     name: "Err".into(),
                     payload: vec![err_val],
+                });
+            }
+            Err(RuntimeError { propagated_none: true, .. }) => {
+                return Ok(Value::Variant {
+                    name: "None".into(),
+                    payload: vec![],
                 });
             }
             other => other,
@@ -1302,16 +1352,19 @@ impl Interpreter {
                     message: format!("assertion failed: {message}"),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 (Some(Value::Bool(false)), _) => Err(RuntimeError {
                     message: "assertion failed".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 _ => Err(RuntimeError {
                     message: "assert expects (Bool, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "assert_eq" => {
@@ -1320,6 +1373,7 @@ impl Interpreter {
                         message: "assert_eq expects (actual, expected, message)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     });
                 };
                 let Some(expected) = args.get(1) else {
@@ -1327,6 +1381,7 @@ impl Interpreter {
                         message: "assert_eq expects (actual, expected, message)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     });
                 };
                 let message = match args.get(2) {
@@ -1336,6 +1391,7 @@ impl Interpreter {
                             message: "assert_eq expects third argument to be String".into(),
                             span: None,
                             propagated_err: None,
+                propagated_none: false,
                         });
                     }
                     None => None,
@@ -1356,6 +1412,7 @@ impl Interpreter {
                         message: msg,
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -1365,6 +1422,7 @@ impl Interpreter {
                         message: "assert_err expects (result, message)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     });
                 };
                 let message = match args.get(1) {
@@ -1374,6 +1432,7 @@ impl Interpreter {
                             message: "assert_err expects second argument to be String".into(),
                             span: None,
                             propagated_err: None,
+                propagated_none: false,
                         });
                     }
                     None => None,
@@ -1390,6 +1449,7 @@ impl Interpreter {
                             message: msg,
                             span: None,
                             propagated_err: None,
+                propagated_none: false,
                         })
                     }
                 }
@@ -1400,6 +1460,7 @@ impl Interpreter {
                     message: "List.length expects a list".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.range" => match (args.first(), args.get(1)) {
@@ -1416,6 +1477,7 @@ impl Interpreter {
                     message: "List.range expects (Int, Int)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.map" => {
@@ -1425,6 +1487,7 @@ impl Interpreter {
                         message: "List.map expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 };
                 if let Value::List(items) = list {
@@ -1439,6 +1502,7 @@ impl Interpreter {
                         message: "List.map expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -1449,6 +1513,7 @@ impl Interpreter {
                         message: "List.filter expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 };
                 if let Value::List(items) = list {
@@ -1465,6 +1530,7 @@ impl Interpreter {
                         message: "List.filter expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -1475,6 +1541,7 @@ impl Interpreter {
                         message: "List.fold expects (List, init, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 };
                 if let Value::List(items) = list {
@@ -1488,6 +1555,7 @@ impl Interpreter {
                         message: "List.fold expects (List, init, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -1498,6 +1566,7 @@ impl Interpreter {
                         message: "List.flat_map expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 };
                 if let Value::List(items) = list {
@@ -1516,6 +1585,7 @@ impl Interpreter {
                         message: "List.flat_map expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             }
@@ -1530,6 +1600,7 @@ impl Interpreter {
                     message: "List.zip expects (List, List)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.sort" => match args.first() {
@@ -1542,6 +1613,7 @@ impl Interpreter {
                     message: "List.sort expects a List".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.contains" => match (args.first(), args.get(1)) {
@@ -1552,6 +1624,7 @@ impl Interpreter {
                     message: "List.contains expects (List, value)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.sum" => match args.first() {
@@ -1567,6 +1640,7 @@ impl Interpreter {
                                 message: "List.sum requires a list of numbers".into(),
                                 span: None,
                                 propagated_err: None,
+                propagated_none: false,
                             }),
                         }
                     }
@@ -1580,6 +1654,7 @@ impl Interpreter {
                     message: "List.sum expects a List".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.min" => match args.first() {
@@ -1599,6 +1674,7 @@ impl Interpreter {
                     message: "List.min expects a List".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.max" => match args.first() {
@@ -1618,6 +1694,7 @@ impl Interpreter {
                     message: "List.max expects a List".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "List.get" => match (args.first(), args.get(1)) {
@@ -1639,6 +1716,7 @@ impl Interpreter {
                     message: "List.get expects (List, Int)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // Map stdlib
@@ -1653,6 +1731,7 @@ impl Interpreter {
                     message: "Map.insert expects (Map, String, value)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.get" => match (args.first(), args.get(1)) {
@@ -1666,6 +1745,7 @@ impl Interpreter {
                     message: "Map.get expects (Map, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.remove" => match (args.first(), args.get(1)) {
@@ -1678,6 +1758,7 @@ impl Interpreter {
                     message: "Map.remove expects (Map, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.contains_key" => match (args.first(), args.get(1)) {
@@ -1688,6 +1769,7 @@ impl Interpreter {
                     message: "Map.contains_key expects (Map, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.keys" => match args.first() {
@@ -1700,6 +1782,7 @@ impl Interpreter {
                     message: "Map.keys expects a Map".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.values" => match args.first() {
@@ -1713,6 +1796,7 @@ impl Interpreter {
                     message: "Map.values expects a Map".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.entries" => match args.first() {
@@ -1728,6 +1812,7 @@ impl Interpreter {
                     message: "Map.entries expects a Map".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Map.length" => match args.first() {
@@ -1736,6 +1821,7 @@ impl Interpreter {
                     message: "Map.length expects a Map".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // Result / Option variant constructors
@@ -1772,6 +1858,7 @@ impl Interpreter {
                     message: "File.read expects (String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "File.write" => match (args.first(), args.get(1)) {
@@ -1794,6 +1881,7 @@ impl Interpreter {
                     message: "File.write expects (String, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "File.exists" => match args.first() {
@@ -1806,6 +1894,7 @@ impl Interpreter {
                     message: "File.exists expects (String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "None" => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
@@ -1838,6 +1927,7 @@ impl Interpreter {
                     message: "Http.get expects (String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Http.post" => match (args.first(), args.get(1)) {
@@ -1868,6 +1958,7 @@ impl Interpreter {
                     message: "Http.post expects (String, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Http.post_json" => match (args.first(), args.get(1)) {
@@ -1901,6 +1992,7 @@ impl Interpreter {
                     message: "Http.post_json expects (String, value)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // Json stdlib
@@ -1921,6 +2013,7 @@ impl Interpreter {
                     message: "Json.parse expects (String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Json.stringify" => {
@@ -1939,6 +2032,7 @@ impl Interpreter {
                     message: "Json.get expects (Map, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Json.keys" => match args.first() {
@@ -1951,6 +2045,7 @@ impl Interpreter {
                     message: "Json.keys expects (Map)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Json.index" => match (args.first(), args.get(1)) {
@@ -1962,7 +2057,7 @@ impl Interpreter {
                         Value::Variant { name: "None".into(), payload: vec![] }
                     }))
                 },
-                _ => Err(RuntimeError { message: "Json.index expects (List, Int)".into(), span: None, propagated_err: None })
+                _ => Err(RuntimeError { message: "Json.index expects (List, Int)".into(), span: None, propagated_err: None, propagated_none: false })
             },
             // Env stdlib
             "Env.get" => match args.first() {
@@ -1982,6 +2077,7 @@ impl Interpreter {
                     message: "Env.get expects (String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "Env.set" => match (args.first(), args.get(1)) {
@@ -1993,6 +2089,7 @@ impl Interpreter {
                     message: "Env.set expects (String, String)".into(),
                     span: None,
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // ── Fs stdlib ────────────────────────────────────────────────────
@@ -2003,7 +2100,7 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Fs.read expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.read expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Fs.write" => match (args.first(), args.get(1)) {
                 (Some(Value::String(path)), Some(Value::String(content))) => {
@@ -2016,7 +2113,7 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Fs.write expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.write expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Fs.append" => match (args.first(), args.get(1)) {
                 (Some(Value::String(path)), Some(Value::String(content))) => {
@@ -2032,11 +2129,11 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Fs.append expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.append expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Fs.exists" => match args.first() {
                 Some(Value::String(path)) => Ok(Some(Value::Bool(std::path::Path::new(path).exists()))),
-                _ => Err(RuntimeError { message: "Fs.exists expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.exists expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Fs.delete" => match args.first() {
                 Some(Value::String(path)) => {
@@ -2045,7 +2142,7 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Fs.delete expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.delete expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Fs.list_dir" => match args.first() {
                 Some(Value::String(path)) => {
@@ -2061,7 +2158,7 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Fs.list_dir expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Fs.list_dir expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             // ── Time stdlib ──────────────────────────────────────────────────
             "Time.now" => {
@@ -2077,7 +2174,7 @@ impl Interpreter {
                     let dt: DateTime<Utc> = Utc.timestamp_opt(*ts, 0).single().unwrap_or_else(Utc::now);
                     Ok(Some(Value::String(dt.format(fmt).to_string())))
                 }
-                _ => Err(RuntimeError { message: "Time.format expects (Int, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Time.format expects (Int, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Time.parse" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(fmt))) => {
@@ -2086,14 +2183,14 @@ impl Interpreter {
                         Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
                     }
                 }
-                _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Time.since" => match args.first() {
                 Some(Value::Int(ts)) => {
                     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
                     Ok(Some(Value::Int(now - ts)))
                 }
-                _ => Err(RuntimeError { message: "Time.since expects (Int)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Time.since expects (Int)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             // ── Str stdlib ───────────────────────────────────────────────────
             "Str.split" => match (args.first(), args.get(1)) {
@@ -2101,7 +2198,7 @@ impl Interpreter {
                     let parts: Vec<Value> = s.split(delim.as_str()).map(|p| Value::String(p.to_string())).collect();
                     Ok(Some(Value::List(parts)))
                 }
-                _ => Err(RuntimeError { message: "Str.split expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.split expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.join" => match (args.first(), args.get(1)) {
                 (Some(Value::List(items)), Some(Value::String(sep))) => {
@@ -2111,41 +2208,41 @@ impl Interpreter {
                     }).collect();
                     Ok(Some(Value::String(parts.join(sep))))
                 }
-                _ => Err(RuntimeError { message: "Str.join expects (List, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.join expects (List, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.trim" => match args.first() {
                 Some(Value::String(s)) => Ok(Some(Value::String(s.trim().to_string()))),
-                _ => Err(RuntimeError { message: "Str.trim expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.trim expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.replace" => match (args.first(), args.get(1), args.get(2)) {
                 (Some(Value::String(s)), Some(Value::String(from)), Some(Value::String(to))) => {
                     Ok(Some(Value::String(s.replace(from.as_str(), to.as_str()))))
                 }
-                _ => Err(RuntimeError { message: "Str.replace expects (String, String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.replace expects (String, String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.contains" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(sub))) => Ok(Some(Value::Bool(s.contains(sub.as_str())))),
-                _ => Err(RuntimeError { message: "Str.contains expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.contains expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.starts_with" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(prefix))) => Ok(Some(Value::Bool(s.starts_with(prefix.as_str())))),
-                _ => Err(RuntimeError { message: "Str.starts_with expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.starts_with expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.ends_with" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(suffix))) => Ok(Some(Value::Bool(s.ends_with(suffix.as_str())))),
-                _ => Err(RuntimeError { message: "Str.ends_with expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.ends_with expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.to_upper" => match args.first() {
                 Some(Value::String(s)) => Ok(Some(Value::String(s.to_uppercase()))),
-                _ => Err(RuntimeError { message: "Str.to_upper expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.to_upper expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.to_lower" => match args.first() {
                 Some(Value::String(s)) => Ok(Some(Value::String(s.to_lowercase()))),
-                _ => Err(RuntimeError { message: "Str.to_lower expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.to_lower expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.len" => match args.first() {
                 Some(Value::String(s)) => Ok(Some(Value::Int(s.chars().count() as i64))),
-                _ => Err(RuntimeError { message: "Str.len expects (String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.len expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.slice" => match (args.first(), args.get(1), args.get(2)) {
                 (Some(Value::String(s)), Some(Value::Int(start)), Some(Value::Int(end))) => {
@@ -2156,14 +2253,14 @@ impl Interpreter {
                     let slice: String = chars[st.min(en)..en.max(st)].iter().collect();
                     Ok(Some(Value::String(slice)))
                 }
-                _ => Err(RuntimeError { message: "Str.slice expects (String, Int, Int)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.slice expects (String, Int, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.index_of" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(sub))) => {
                     let idx = s.find(sub.as_str()).map(|byte_idx| s[..byte_idx].chars().count() as i64).unwrap_or(-1);
                     Ok(Some(Value::Int(idx)))
                 }
-                _ => Err(RuntimeError { message: "Str.index_of expects (String, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.index_of expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.pad_left" => match (args.first(), args.get(1), args.get(2)) {
                 (Some(Value::String(s)), Some(Value::Int(width)), Some(Value::String(ch))) => {
@@ -2177,7 +2274,7 @@ impl Interpreter {
                         Ok(Some(Value::String(format!("{}{}", padding, s))))
                     }
                 }
-                _ => Err(RuntimeError { message: "Str.pad_left expects (String, Int, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.pad_left expects (String, Int, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.pad_right" => match (args.first(), args.get(1), args.get(2)) {
                 (Some(Value::String(s)), Some(Value::Int(width)), Some(Value::String(ch))) => {
@@ -2191,13 +2288,13 @@ impl Interpreter {
                         Ok(Some(Value::String(format!("{}{}", s, padding))))
                     }
                 }
-                _ => Err(RuntimeError { message: "Str.pad_right expects (String, Int, String)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.pad_right expects (String, Int, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.repeat" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::Int(n))) => {
                     Ok(Some(Value::String(s.repeat((*n).max(0) as usize))))
                 }
-                _ => Err(RuntimeError { message: "Str.repeat expects (String, Int)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.repeat expects (String, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Str.char_at" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::Int(i))) => {
@@ -2208,7 +2305,7 @@ impl Interpreter {
                         None => Ok(Some(Value::String(String::new()))),
                     }
                 }
-                _ => Err(RuntimeError { message: "Str.char_at expects (String, Int)".into(), span: None, propagated_err: None }),
+                _ => Err(RuntimeError { message: "Str.char_at expects (String, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             _ => Ok(None),
         }
@@ -2259,6 +2356,7 @@ impl Interpreter {
                     message: "unwrap_or expects Option or Result value".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "unwrap" => match target {
@@ -2272,16 +2370,19 @@ impl Interpreter {
                     message: "unwrap called on None".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 Value::Variant { name, payload } if name == "Err" => Err(RuntimeError {
                     message: format!("unwrap called on Err({})", payload.first().map(display_value).unwrap_or_default()),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 _ => Err(RuntimeError {
                     message: "unwrap expects Some(_), Ok(_), or Confident(_)".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "map" => {
@@ -2325,6 +2426,7 @@ impl Interpreter {
                         message: "map expects Option/Result/List value".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2355,6 +2457,7 @@ impl Interpreter {
                         message: "and_then expects Option or Result".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2383,6 +2486,7 @@ impl Interpreter {
                     message: "unwrap_or_else expects Option or Result".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "filter" if matches!(&target, Value::Variant { .. }) => {
@@ -2407,6 +2511,7 @@ impl Interpreter {
                         message: "filter on Option expects Some or None".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2422,6 +2527,7 @@ impl Interpreter {
                     message: "ok_or expects Option value".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "map_err" => {
@@ -2442,6 +2548,7 @@ impl Interpreter {
                         message: "map_err expects Result value".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2465,6 +2572,7 @@ impl Interpreter {
                         message: "ok() expects Result value".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2480,6 +2588,7 @@ impl Interpreter {
                         message: "err() expects Result value".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2491,6 +2600,7 @@ impl Interpreter {
                     message: "len expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "trim" => match target {                Value::String(s) => Ok(Value::String(s.trim().to_string())),
@@ -2498,6 +2608,7 @@ impl Interpreter {
                     message: "trim expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "split" => match target {
@@ -2513,6 +2624,7 @@ impl Interpreter {
                     message: "split expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "contains" => match target {
@@ -2524,6 +2636,7 @@ impl Interpreter {
                     message: "contains expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "starts_with" => match target {
@@ -2535,6 +2648,7 @@ impl Interpreter {
                     message: "starts_with expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "ends_with" => match target {
@@ -2546,6 +2660,7 @@ impl Interpreter {
                     message: "ends_with expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "to_upper" => match target {
@@ -2554,6 +2669,7 @@ impl Interpreter {
                     message: "to_upper expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "to_lower" => match target {
@@ -2562,6 +2678,7 @@ impl Interpreter {
                     message: "to_lower expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
 
@@ -2576,6 +2693,7 @@ impl Interpreter {
                     message: "replace expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "is_empty" => match target {
@@ -2585,6 +2703,7 @@ impl Interpreter {
                     message: "is_empty expects String or List".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "char_at" => match target {
@@ -2595,6 +2714,7 @@ impl Interpreter {
                             message: "char_at expects an Int index".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     };
                     let chars: Vec<char> = s.chars().collect();
@@ -2611,6 +2731,7 @@ impl Interpreter {
                     message: "char_at expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "parse_int" => match target {
@@ -2624,6 +2745,7 @@ impl Interpreter {
                     message: "parse_int expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "parse_float" => match target {
@@ -2637,6 +2759,7 @@ impl Interpreter {
                     message: "parse_float expects String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "to_int" => match target {
@@ -2652,6 +2775,7 @@ impl Interpreter {
                     message: "to_int expects Int, Float, or String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "to_float" => match target {
@@ -2667,6 +2791,7 @@ impl Interpreter {
                     message: "to_float expects Int, Float, or String".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // Numeric methods
@@ -2677,6 +2802,7 @@ impl Interpreter {
                     message: "abs expects Int or Float".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "floor" => match target {
@@ -2686,6 +2812,7 @@ impl Interpreter {
                     message: "floor expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "ceil" => match target {
@@ -2695,6 +2822,7 @@ impl Interpreter {
                     message: "ceil expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "round" => match target {
@@ -2704,6 +2832,7 @@ impl Interpreter {
                     message: "round expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "sqrt" => match target {
@@ -2713,6 +2842,7 @@ impl Interpreter {
                     message: "sqrt expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "pow" => match target {
@@ -2724,6 +2854,7 @@ impl Interpreter {
                             message: "pow expects a numeric exponent".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     };
                     Ok(Value::Float(f.powf(exp)))
@@ -2739,6 +2870,7 @@ impl Interpreter {
                             message: "pow expects a numeric exponent".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     }
                 }
@@ -2746,6 +2878,7 @@ impl Interpreter {
                     message: "pow expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "log" => match target {
@@ -2758,6 +2891,7 @@ impl Interpreter {
                             message: "log expects an optional numeric base".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     };
                     Ok(Value::Float(f.log(base)))
@@ -2772,6 +2906,7 @@ impl Interpreter {
                             message: "log expects an optional numeric base".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         }),
                     };
                     Ok(Value::Float(f.log(base)))
@@ -2780,6 +2915,7 @@ impl Interpreter {
                     message: "log expects Float or Int".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             // List method-style helpers
@@ -2804,6 +2940,7 @@ impl Interpreter {
                         message: "filter expects List".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2826,6 +2963,7 @@ impl Interpreter {
                         message: "fold expects List".into(),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     }),
                 }
             }
@@ -2835,6 +2973,7 @@ impl Interpreter {
                     message: "collect expects List".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "zip" => match (target, args.first().cloned()) {
@@ -2850,6 +2989,7 @@ impl Interpreter {
                     message: "zip expects two lists".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "enumerate" => match target {
@@ -2865,6 +3005,7 @@ impl Interpreter {
                     message: "enumerate expects List".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
 
@@ -2876,6 +3017,7 @@ impl Interpreter {
                     message: "candidates expects Uncertain(list)".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "top" => match target {
@@ -2897,6 +3039,7 @@ impl Interpreter {
                             message: "Uncertain payload must be list".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         })
                     }
                 }
@@ -2904,6 +3047,7 @@ impl Interpreter {
                     message: "top expects Uncertain(list)".into(),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
             },
             "to_string" => Ok(Value::String(display_value(&target))),
@@ -2911,6 +3055,7 @@ impl Interpreter {
                 message: format!("unsupported method '{}'", method),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             }),
         }
     }
@@ -2926,6 +3071,7 @@ impl Interpreter {
                 message: format!("unknown tool '{}'", tool_name),
                 span: Some(span),
                 propagated_err: None,
+                propagated_none: false,
             });
         };
 
@@ -3134,6 +3280,7 @@ impl Interpreter {
                         message: format!("unsupported @http method '{}'", method),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
             };
@@ -3276,12 +3423,14 @@ impl Interpreter {
             message: format!("failed to serialize checkpoint state: {e}"),
             span: None,
             propagated_err: None,
+                propagated_none: false,
         })?;
 
         fs::write(checkpoint_path, state_text).map_err(|e| RuntimeError {
             message: format!("failed to write checkpoint file '{}': {e}", checkpoint_path),
             span: None,
             propagated_err: None,
+                propagated_none: false,
         })
     }
 
@@ -3348,6 +3497,7 @@ impl Interpreter {
             message: format!("failed to serialize journal entry: {e}"),
             span: None,
             propagated_err: None,
+                propagated_none: false,
         })?;
 
         let mut file = OpenOptions::new()
@@ -3358,12 +3508,14 @@ impl Interpreter {
                 message: format!("failed to open journal file '{}': {e}", self.journal_path),
                 span: None,
                 propagated_err: None,
+                propagated_none: false,
             })?;
 
         writeln!(file, "{line}").map_err(|e| RuntimeError {
             message: format!("failed to write journal entry: {e}"),
             span: None,
             propagated_err: None,
+                propagated_none: false,
         })
     }
 
@@ -3380,6 +3532,7 @@ impl Interpreter {
                     message: format!("integer overflow: {} + {}", a, b),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 + b)),
@@ -3391,6 +3544,7 @@ impl Interpreter {
                     message: format!("integer overflow: {} - {}", a, b),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 - b)),
@@ -3402,6 +3556,7 @@ impl Interpreter {
                     message: format!("integer overflow: {} * {}", a, b),
                     span: Some(span),
                     propagated_err: None,
+                propagated_none: false,
                 }),
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),
                 (Value::Int(a), Value::Float(b)) => Ok(Value::Float(a as f64 * b)),
@@ -3415,12 +3570,14 @@ impl Interpreter {
                             message: "division by zero".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         });
                     }
                     a.checked_div(b).map(Value::Int).ok_or_else(|| RuntimeError {
                         message: format!("integer overflow: {} / {}", a, b),
                         span: Some(span),
                         propagated_err: None,
+                propagated_none: false,
                     })
                 }
                 (Value::Float(a), Value::Float(b)) => Ok(Value::Float(a / b)),
@@ -3435,6 +3592,7 @@ impl Interpreter {
                             message: "division by zero".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         });
                     }
                     Ok(Value::Int(a.div_euclid(b)))
@@ -3448,6 +3606,7 @@ impl Interpreter {
                             message: "remainder by zero".into(),
                             span: Some(span),
                             propagated_err: None,
+                propagated_none: false,
                         });
                     }
                     Ok(Value::Int(a % b))
@@ -3578,6 +3737,7 @@ fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
         message: format!("failed to read replay source '{}': {e}", path),
         span: None,
         propagated_err: None,
+                propagated_none: false,
     })?;
 
     // If the path points to a checkpoint state JSON, follow its journal_path.
@@ -3590,6 +3750,7 @@ fn load_replay_cursor(path: &str) -> Result<ReplayCursor, RuntimeError> {
                 ),
                 span: None,
                 propagated_err: None,
+                propagated_none: false,
             })?;
         let mut entries = Vec::new();
         for line in journal_content.lines() {
@@ -3808,6 +3969,7 @@ fn type_error<T>(span: Span, msg: &str) -> Result<T, RuntimeError> {
         message: msg.to_string(),
         span: Some(span),
         propagated_err: None,
+                propagated_none: false,
     })
 }
 
