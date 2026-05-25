@@ -1,0 +1,53 @@
+# Phase 42 QA: @retry and @timeout decorators on tool declarations
+
+# Basic retry - tool that always succeeds (no actual retry needed)
+@retry(max: 3)
+tool fetch_ok(url: String) -> Result<String, String> {
+    Ok("data")
+}
+
+let r = fetch_ok("https://example.com")
+assert_eq(r, Ok("data"))
+
+# @timeout - tool that completes quickly (well within 5000ms)
+@timeout(ms: 5000)
+tool quick_op() -> Result<String, String> {
+    Ok("fast result")
+}
+
+let t = quick_op()
+assert_eq(t, Ok("fast result"))
+
+# Combined decorators
+@retry(max: 2)
+@timeout(ms: 5000)
+tool resilient_ok(url: String) -> Result<String, String> {
+    Ok("resilient data")
+}
+
+let c = resilient_ok("https://example.com")
+assert_eq(c, Ok("resilient data"))
+
+# Retry with simulated failure then success using a counter file
+let _ = File.write("/tmp/lace_retry_counter.txt", "0")
+
+tool attempt_counter() -> Result<String, String> {
+    let raw = File.read("/tmp/lace_retry_counter.txt")
+    let count_str = match raw {
+        Ok(s) => s,
+        Err(_) => "0",
+    }
+    let n = if count_str == "0" { 0 } else { 1 }
+    let _ = File.write("/tmp/lace_retry_counter.txt", to_string(n + 1))
+    if n == 0 { Err("not yet") } else { Ok("success on attempt 2") }
+}
+
+@retry(max: 2)
+tool flaky_op() -> Result<String, String> {
+    attempt_counter()
+}
+
+let result = flaky_op()
+assert_eq(result, Ok("success on attempt 2"))
+
+print("phase42 assertions passed")

@@ -81,10 +81,18 @@ impl ToolLogger {
         self.emit(&line);
     }
 
-    pub fn log_retry(&mut self, tool: &str, attempt: u32) {
+    pub fn log_retry(&mut self, tool: &str, attempt: u32, max: i64) {
         let run_id = self.run_id.clone();
         let line = format!(
-            r#"{{"event":"tool_retry","tool":"{tool}","attempt":{attempt},"run_id":"{run_id}"}}"#
+            r#"{{"event":"tool_retry","tool":"{tool}","attempt":{attempt},"max":{max},"run_id":"{run_id}"}}"#
+        );
+        self.emit(&line);
+    }
+
+    pub fn log_timeout(&mut self, tool: &str, ms: i64) {
+        let run_id = self.run_id.clone();
+        let line = format!(
+            r#"{{"event":"tool_timeout","tool":"{tool}","ms":{ms},"run_id":"{run_id}"}}"#
         );
         self.emit(&line);
     }

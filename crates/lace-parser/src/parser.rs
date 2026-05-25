@@ -577,7 +577,16 @@ impl Parser {
         let mut out = Vec::new();
         while self.match_tok(&TokenKind::At) {
             let start = self.prev_span().start;
-            let name = self.expect_ident().unwrap_or_else(|| "<error>".into());
+            // Allow keywords as annotation names (e.g. @timeout, @retry)
+            let name = if matches!(self.peek_kind(), TokenKind::Timeout) {
+                self.bump();
+                "timeout".to_string()
+            } else if matches!(self.peek_kind(), TokenKind::Retries) {
+                self.bump();
+                "retries".to_string()
+            } else {
+                self.expect_ident().unwrap_or_else(|| "<error>".into())
+            };
             let mut args = Vec::new();
             let mut positional_idx = 0usize;
             if self.match_tok(&TokenKind::LParen) {

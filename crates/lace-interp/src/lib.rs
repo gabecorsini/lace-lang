@@ -1222,7 +1222,7 @@ impl Interpreter {
             .and_then(|arg| if let lace_ast::AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
 
         let timeout_ms: Option<i64> = f.annotations.iter()
-            .find(|a| a.name == "timed")
+            .find(|a| a.name == "timeout")
             .and_then(|a| a.args.iter().find(|arg| arg.name == "ms"))
             .and_then(|arg| if let lace_ast::AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
 
@@ -1231,12 +1231,12 @@ impl Interpreter {
         // Execute once
         let mut result = self.exec_fn_body(&f, args.clone(), span)?;
 
-        // @retry: if result is Err, retry up to max times
+        // @retry: if result is Err, retry up to max-1 additional times (total = max attempts)
         if let Some(max) = retry_max {
-            for _ in 0..max {
-                if !is_err_variant(&result) {
-                    break;
-                }
+            let mut attempt: u32 = 1;
+            while is_err_variant(&result) && attempt < max as u32 {
+                attempt += 1;
+                self.tool_logger.log_retry(name, attempt, max);
                 result = self.exec_fn_body(&f, args.clone(), span)?;
             }
         }
@@ -1244,9 +1244,10 @@ impl Interpreter {
         // @timeout: post-hoc check (best-effort for single-threaded interpreter)
         if let Some(ms) = timeout_ms {
             if started.elapsed().as_millis() as i64 > ms {
+                self.tool_logger.log_timeout(name, ms);
                 return Ok(Value::Variant {
                     name: "Err".into(),
-                    payload: vec![Value::String("timeout".into())],
+                    payload: vec![Value::String(format!("timeout after {}ms", ms))],
                 });
             }
         }
@@ -4279,48 +4280,78 @@ impl Interpreter {
             return Ok(parsed);
         }
 
+        // Extract @retry and @timeout from tool annotations
+        let retry_max: Option<i64> = tool.decl.annotations.iter()
+            .find(|a| a.name == "retry")
+            .and_then(|a| a.args.iter().find(|arg| arg.name == "max"))
+            .and_then(|arg| if let AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
+
+        let timeout_ms: Option<i64> = tool.decl.annotations.iter()
+            .find(|a| a.name == "timeout")
+            .and_then(|a| a.args.iter().find(|arg| arg.name == "ms"))
+            .and_then(|arg| if let AnnotationValue::Int(n) = &arg.value { Some(*n) } else { None });
+
         // Execute Lace body if present
         if let Some(body) = tool.decl.body.clone() {
-            // Push a call frame with IO effects so the body can call IO stdlib
-            self.call_stack.push(CallFrame {
-                effects: vec![EffectExpr::Builtin(EffectTag::Io)],
-            });
-            self.env.push();
-            for (p, a) in tool.decl.params.iter().zip(args.iter()) {
-                self.env.define(p.name.clone(), a.clone());
+            // Helper closure to execute the body once and return Value
+            let exec_body_once = |interp: &mut Self| -> Result<Value, RuntimeError> {
+                interp.call_stack.push(CallFrame {
+                    effects: vec![EffectExpr::Builtin(EffectTag::Io)],
+                });
+                interp.env.push();
+                for (p, a) in tool.decl.params.iter().zip(args.iter()) {
+                    interp.env.define(p.name.clone(), a.clone());
+                }
+                let eval_result = interp.eval_block(&body);
+                interp.env.pop();
+                interp.call_stack.pop();
+
+                // Handle propagated Err/None from `?` operator
+                let eval_result = match eval_result {
+                    Err(RuntimeError { propagated_err: Some(err_val), .. }) => {
+                        return Ok(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![err_val],
+                        });
+                    }
+                    Err(RuntimeError { propagated_none: true, .. }) => {
+                        return Ok(Value::Variant { name: "None".into(), payload: vec![] });
+                    }
+                    other => other,
+                };
+
+                let out = match eval_result? {
+                    EvalFlow::Value(v) => interp.return_value.take().unwrap_or(v),
+                    EvalFlow::Return(v) => v,
+                };
+                Ok(out)
+            };
+
+            let retry_total = retry_max.unwrap_or(1).max(1) as u32;
+            let mut out = exec_body_once(self)?;
+            let mut attempt: u32 = 1;
+
+            while is_err_variant(&out) && attempt < retry_total {
+                attempt += 1;
+                self.tool_logger.log_retry(tool_name, attempt, retry_total as i64);
+                out = exec_body_once(self)?;
             }
-            let eval_result = self.eval_block(&body);
-            self.env.pop();
-            self.call_stack.pop();
 
-            // Handle propagated Err/None from `?` operator
-            let eval_result = match eval_result {
-                Err(RuntimeError { propagated_err: Some(err_val), .. }) => {
-                    let out = Value::Variant {
+            // @timeout: post-hoc best-effort check
+            if let Some(ms) = timeout_ms {
+                if started.elapsed().as_millis() as i64 > ms {
+                    self.tool_logger.log_timeout(tool_name, ms);
+                    let duration_ms = started.elapsed().as_millis() as u64;
+                    self.tool_logger.log_err(tool_name, &format!("timeout after {}ms", ms), duration_ms);
+                    return Ok(Value::Variant {
                         name: "Err".into(),
-                        payload: vec![err_val],
-                    };
-                    let duration_ms = started.elapsed().as_millis() as u64;
-                    let err_str = display_value(&out);
-                    self.tool_logger.log_err(tool_name, &err_str, duration_ms);
-                    return Ok(out);
+                        payload: vec![Value::String(format!("timeout after {}ms", ms))],
+                    });
                 }
-                Err(RuntimeError { propagated_none: true, .. }) => {
-                    let out = Value::Variant { name: "None".into(), payload: vec![] };
-                    let duration_ms = started.elapsed().as_millis() as u64;
-                    self.tool_logger.log_ok(tool_name, duration_ms);
-                    return Ok(out);
-                }
-                other => other,
-            };
-
-            let out = match eval_result? {
-                EvalFlow::Value(v) => self.return_value.take().unwrap_or(v),
-                EvalFlow::Return(v) => v,
-            };
+            }
 
             let duration_ms = started.elapsed().as_millis() as u64;
-            let is_err = matches!(&out, Value::Variant { name, .. } if name == "Err");
+            let is_err = is_err_variant(&out);
             if is_err {
                 let err_str = display_value(&out);
                 self.tool_logger.log_err(tool_name, &err_str, duration_ms);

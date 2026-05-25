@@ -722,6 +722,18 @@ impl Checker {
     }
 
     fn check_fn(&mut self, f: &FnDecl) {
+        // @retry and @timeout are only valid on `tool` declarations
+        for ann in &f.annotations {
+            if ann.name == "retry" || ann.name == "timeout" {
+                self.errors.push(TypeError::InvalidToolDecl {
+                    name: f.name.clone(),
+                    message: format!(
+                        "@{} decorator is only valid on `tool` declarations, not `fn`",
+                        ann.name
+                    ),
+                });
+            }
+        }
         let prev_fn = self.current_fn.take();
         self.current_fn = Some(f.name.clone());
         self.push_scope();
