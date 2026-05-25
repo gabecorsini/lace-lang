@@ -755,3 +755,204 @@ fn main() -> Int [Pure] {
 "#;
     assert_eq!(run(src).unwrap(), Value::Int(35));
 }
+
+// ── Fs module tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_fs_write_and_read() {
+    let result = run(r#"
+fn main() -> Unit [IO] {
+    let _ = Fs.write("/tmp/lace_fs_test_rw.txt", "hello lace")
+    Fs.read("/tmp/lace_fs_test_rw.txt")
+}
+"#).unwrap();
+    assert_eq!(result, Value::Variant {
+        name: "Ok".into(),
+        payload: vec![Value::String("hello lace".into())],
+    });
+}
+
+#[test]
+fn test_fs_exists_true() {
+    let _ = run(r#"fn main() -> Unit [IO] { Fs.write("/tmp/lace_exists_test.txt", "x") }"#);
+    let result = run(r#"fn main() -> Unit [IO] { Fs.exists("/tmp/lace_exists_test.txt") }"#).unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_fs_exists_false() {
+    let result = run(r#"fn main() -> Unit [IO] { Fs.exists("/tmp/lace_surely_missing_xyz_123.txt") }"#).unwrap();
+    assert_eq!(result, Value::Bool(false));
+}
+
+#[test]
+fn test_fs_read_missing() {
+    let result = run(r#"fn main() -> Unit [IO] { Fs.read("/tmp/no_such_file_lace_xyz.txt") }"#).unwrap();
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Err"));
+}
+
+#[test]
+fn test_fs_append() {
+    let _ = run(r#"fn main() -> Unit [IO] { Fs.write("/tmp/lace_append_test.txt", "line1\n") }"#);
+    let _ = run(r#"fn main() -> Unit [IO] { Fs.append("/tmp/lace_append_test.txt", "line2\n") }"#);
+    let result = run(r#"fn main() -> Unit [IO] { Fs.read("/tmp/lace_append_test.txt") }"#).unwrap();
+    if let Value::Variant { name, payload } = result {
+        assert_eq!(name, "Ok");
+        if let Some(Value::String(s)) = payload.first() {
+            assert!(s.contains("line1"));
+            assert!(s.contains("line2"));
+        } else {
+            panic!("expected string payload");
+        }
+    } else {
+        panic!("expected Ok variant");
+    }
+}
+
+#[test]
+fn test_fs_delete() {
+    let _ = run(r#"fn main() -> Unit [IO] { Fs.write("/tmp/lace_delete_test.txt", "bye") }"#);
+    let del = run(r#"fn main() -> Unit [IO] { Fs.delete("/tmp/lace_delete_test.txt") }"#).unwrap();
+    assert!(matches!(del, Value::Variant { ref name, .. } if name == "Ok"));
+    let exists = run(r#"fn main() -> Unit [IO] { Fs.exists("/tmp/lace_delete_test.txt") }"#).unwrap();
+    assert_eq!(exists, Value::Bool(false));
+}
+
+#[test]
+fn test_fs_list_dir() {
+    let result = run(r#"fn main() -> Unit [IO] { Fs.list_dir("/tmp") }"#).unwrap();
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Ok"));
+}
+
+// ── Time module tests ────────────────────────────────────────────────────────
+
+#[test]
+fn test_time_now_is_int() {
+    let result = run(r#"fn main() -> Unit [IO] { Time.now() }"#).unwrap();
+    assert!(matches!(result, Value::Int(_)));
+}
+
+#[test]
+fn test_time_now_ms_is_int() {
+    let result = run(r#"fn main() -> Unit [IO] { Time.now_ms() }"#).unwrap();
+    assert!(matches!(result, Value::Int(v) if v > 0));
+}
+
+#[test]
+fn test_time_format_date() {
+    let result = run(r#"fn main() -> Unit [IO] { Time.format(1716508800, "%Y-%m-%d") }"#).unwrap();
+    assert!(matches!(result, Value::String(ref s) if s.contains("2024")));
+}
+
+#[test]
+fn test_time_since_non_negative() {
+    let result = run(r#"
+fn main() -> Unit [IO] {
+    let ts = Time.now()
+    Time.since(ts)
+}
+"#).unwrap();
+    assert!(matches!(result, Value::Int(v) if v >= 0));
+}
+
+#[test]
+fn test_time_parse_ok() {
+    let result = run(r#"fn main() -> Unit [IO] { Time.parse("2024-05-24 00:00:00", "%Y-%m-%d %H:%M:%S") }"#).unwrap();
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Ok"));
+}
+
+#[test]
+fn test_time_parse_err() {
+    let result = run(r#"fn main() -> Unit [IO] { Time.parse("not-a-date", "%Y-%m-%d") }"#).unwrap();
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Err"));
+}
+
+// ── Str module tests ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_str_split() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.split("a,b,c", ",") }"#).unwrap();
+    assert_eq!(result, Value::List(vec![
+        Value::String("a".into()),
+        Value::String("b".into()),
+        Value::String("c".into()),
+    ]));
+}
+
+#[test]
+fn test_str_join() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.join(["x", "y", "z"], "-") }"#).unwrap();
+    assert_eq!(result, Value::String("x-y-z".into()));
+}
+
+#[test]
+fn test_str_trim() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.trim("  hello  ") }"#).unwrap();
+    assert_eq!(result, Value::String("hello".into()));
+}
+
+#[test]
+fn test_str_replace() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.replace("hello world", "world", "lace") }"#).unwrap();
+    assert_eq!(result, Value::String("hello lace".into()));
+}
+
+#[test]
+fn test_str_contains() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.contains("foobar", "oba") }"#).unwrap();
+    assert_eq!(result, Value::Bool(true));
+    let result2 = run(r#"fn main() -> Unit [IO] { Str.contains("foobar", "xyz") }"#).unwrap();
+    assert_eq!(result2, Value::Bool(false));
+}
+
+#[test]
+fn test_str_starts_ends_with() {
+    let r1 = run(r#"fn main() -> Unit [IO] { Str.starts_with("hello", "hel") }"#).unwrap();
+    assert_eq!(r1, Value::Bool(true));
+    let r2 = run(r#"fn main() -> Unit [IO] { Str.ends_with("hello", "llo") }"#).unwrap();
+    assert_eq!(r2, Value::Bool(true));
+}
+
+#[test]
+fn test_str_case() {
+    let r1 = run(r#"fn main() -> Unit [IO] { Str.to_upper("hello") }"#).unwrap();
+    assert_eq!(r1, Value::String("HELLO".into()));
+    let r2 = run(r#"fn main() -> Unit [IO] { Str.to_lower("HELLO") }"#).unwrap();
+    assert_eq!(r2, Value::String("hello".into()));
+}
+
+#[test]
+fn test_str_len() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.len("hello") }"#).unwrap();
+    assert_eq!(result, Value::Int(5));
+}
+
+#[test]
+fn test_str_slice() {
+    let result = run(r#"fn main() -> Unit [IO] { Str.slice("hello", 1, 4) }"#).unwrap();
+    assert_eq!(result, Value::String("ell".into()));
+}
+
+#[test]
+fn test_str_index_of() {
+    let r1 = run(r#"fn main() -> Unit [IO] { Str.index_of("hello", "ll") }"#).unwrap();
+    assert_eq!(r1, Value::Int(2));
+    let r2 = run(r#"fn main() -> Unit [IO] { Str.index_of("hello", "xyz") }"#).unwrap();
+    assert_eq!(r2, Value::Int(-1));
+}
+
+#[test]
+fn test_str_pad() {
+    let r1 = run(r#"fn main() -> Unit [IO] { Str.pad_left("5", 3, "0") }"#).unwrap();
+    assert_eq!(r1, Value::String("005".into()));
+    let r2 = run(r#"fn main() -> Unit [IO] { Str.pad_right("hi", 5, "-") }"#).unwrap();
+    assert_eq!(r2, Value::String("hi---".into()));
+}
+
+#[test]
+fn test_str_repeat_and_char_at() {
+    let r1 = run(r#"fn main() -> Unit [IO] { Str.repeat("ab", 3) }"#).unwrap();
+    assert_eq!(r1, Value::String("ababab".into()));
+    let r2 = run(r#"fn main() -> Unit [IO] { Str.char_at("hello", 1) }"#).unwrap();
+    assert_eq!(r2, Value::String("e".into()));
+}

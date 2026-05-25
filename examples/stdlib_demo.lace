@@ -1,0 +1,68 @@
+# stdlib_demo.lace — exercises Fs, Time, and Str modules
+
+# ── Fs module ────────────────────────────────────────────────────────────────
+let write_result = Fs.write("/tmp/lace_stdlib_demo.txt", "hello from lace\n")
+let append_result = Fs.append("/tmp/lace_stdlib_demo.txt", "second line\n")
+let content = Fs.read("/tmp/lace_stdlib_demo.txt")
+let file_exists = Fs.exists("/tmp/lace_stdlib_demo.txt")
+print(file_exists)
+
+match content {
+    Ok(text) => { print(text) },
+    Err(msg) => { print(msg) },
+}
+
+let dir_entries = Fs.list_dir("/tmp")
+match dir_entries {
+    Ok(names) => { print(Str.join(names, ", ")) },
+    Err(msg) => { print(msg) },
+}
+
+let del_result = Fs.delete("/tmp/lace_stdlib_demo.txt")
+print(Fs.exists("/tmp/lace_stdlib_demo.txt"))
+
+# ── Time module ──────────────────────────────────────────────────────────────
+let ts = Time.now()
+let ts_ms = Time.now_ms()
+let formatted = Time.format(ts, "%Y-%m-%d %H:%M:%S")
+print(formatted)
+
+let elapsed = Time.since(ts)
+print(elapsed)
+
+let parse_result = Time.parse("2025-01-15 12:00:00", "%Y-%m-%d %H:%M:%S")
+match parse_result {
+    Ok(parsed_ts) => { print(parsed_ts) },
+    Err(msg) => { print(msg) },
+}
+
+# ── Str module ───────────────────────────────────────────────────────────────
+let parts = Str.split("one,two,three", ",")
+let joined = Str.join(parts, " | ")
+print(joined)
+
+let trimmed = Str.trim("   spaces   ")
+print(trimmed)
+
+let replaced = Str.replace("hello world", "world", "lace")
+print(replaced)
+
+print(Str.contains("foobar", "oba"))
+print(Str.starts_with("hello", "hel"))
+print(Str.ends_with("hello", "llo"))
+
+print(Str.to_upper("lowercase"))
+print(Str.to_lower("UPPERCASE"))
+
+print(Str.len("hello"))
+print(Str.slice("hello world", 6, 11))
+print(Str.index_of("hello", "ll"))
+
+let padded_left = Str.pad_left("42", 5, "0")
+print(padded_left)
+
+let padded_right = Str.pad_right("hi", 6, ".")
+print(padded_right)
+
+print(Str.repeat("ab", 4))
+print(Str.char_at("hello", 0))

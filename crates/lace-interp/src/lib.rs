@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 pub mod tool_log;
 pub use tool_log::ToolLogger;
@@ -265,6 +266,9 @@ impl Interpreter {
         self.env.define("Http".into(), Value::String("Http".into()));
         self.env.define("Json".into(), Value::String("Json".into()));
         self.env.define("Env".into(), Value::String("Env".into()));
+        self.env.define("Fs".into(), Value::String("Fs".into()));
+        self.env.define("Time".into(), Value::String("Time".into()));
+        self.env.define("Str".into(), Value::String("Str".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -314,6 +318,9 @@ impl Interpreter {
         self.env.define("Http".into(), Value::String("Http".into()));
         self.env.define("Json".into(), Value::String("Json".into()));
         self.env.define("Env".into(), Value::String("Env".into()));
+        self.env.define("Fs".into(), Value::String("Fs".into()));
+        self.env.define("Time".into(), Value::String("Time".into()));
+        self.env.define("Str".into(), Value::String("Str".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -1966,6 +1973,221 @@ impl Interpreter {
                     span: None,
                     propagated_err: None,
                 }),
+            },
+            // ── Fs stdlib ────────────────────────────────────────────────────
+            "Fs.read" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::read_to_string(path) {
+                        Ok(content) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::String(content)] })),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.read expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Fs.write" => match (args.first(), args.get(1)) {
+                (Some(Value::String(path)), Some(Value::String(content))) => {
+                    let p = std::path::Path::new(path);
+                    if let Some(parent) = p.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    match fs::write(p, content) {
+                        Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.write expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Fs.append" => match (args.first(), args.get(1)) {
+                (Some(Value::String(path)), Some(Value::String(content))) => {
+                    let p = std::path::Path::new(path);
+                    if let Some(parent) = p.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    match OpenOptions::new().create(true).append(true).open(p) {
+                        Ok(mut file) => match file.write_all(content.as_bytes()) {
+                            Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
+                            Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        },
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.append expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Fs.exists" => match args.first() {
+                Some(Value::String(path)) => Ok(Some(Value::Bool(std::path::Path::new(path).exists()))),
+                _ => Err(RuntimeError { message: "Fs.exists expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Fs.delete" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::remove_file(path) {
+                        Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.delete expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Fs.list_dir" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::read_dir(path) {
+                        Ok(entries) => {
+                            let mut names = Vec::new();
+                            for entry in entries.flatten() {
+                                names.push(Value::String(entry.file_name().to_string_lossy().to_string()));
+                            }
+                            names.sort_by(|a, b| cmp_values(a, b));
+                            Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::List(names)] }))
+                        }
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.list_dir expects (String)".into(), span: None, propagated_err: None }),
+            },
+            // ── Time stdlib ──────────────────────────────────────────────────
+            "Time.now" => {
+                let val = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                Ok(Some(Value::Int(val)))
+            }
+            "Time.now_ms" => {
+                let val = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+                Ok(Some(Value::Int(val)))
+            }
+            "Time.format" => match (args.first(), args.get(1)) {
+                (Some(Value::Int(ts)), Some(Value::String(fmt))) => {
+                    let dt: DateTime<Utc> = Utc.timestamp_opt(*ts, 0).single().unwrap_or_else(Utc::now);
+                    Ok(Some(Value::String(dt.format(fmt).to_string())))
+                }
+                _ => Err(RuntimeError { message: "Time.format expects (Int, String)".into(), span: None, propagated_err: None }),
+            },
+            "Time.parse" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(fmt))) => {
+                    match NaiveDateTime::parse_from_str(s, fmt) {
+                        Ok(ndt) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(ndt.and_utc().timestamp())] })),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Time.since" => match args.first() {
+                Some(Value::Int(ts)) => {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+                    Ok(Some(Value::Int(now - ts)))
+                }
+                _ => Err(RuntimeError { message: "Time.since expects (Int)".into(), span: None, propagated_err: None }),
+            },
+            // ── Str stdlib ───────────────────────────────────────────────────
+            "Str.split" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(delim))) => {
+                    let parts: Vec<Value> = s.split(delim.as_str()).map(|p| Value::String(p.to_string())).collect();
+                    Ok(Some(Value::List(parts)))
+                }
+                _ => Err(RuntimeError { message: "Str.split expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.join" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::String(sep))) => {
+                    let parts: Vec<String> = items.iter().map(|v| match v {
+                        Value::String(s) => s.clone(),
+                        other => display_value(other),
+                    }).collect();
+                    Ok(Some(Value::String(parts.join(sep))))
+                }
+                _ => Err(RuntimeError { message: "Str.join expects (List, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.trim" => match args.first() {
+                Some(Value::String(s)) => Ok(Some(Value::String(s.trim().to_string()))),
+                _ => Err(RuntimeError { message: "Str.trim expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.replace" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(s)), Some(Value::String(from)), Some(Value::String(to))) => {
+                    Ok(Some(Value::String(s.replace(from.as_str(), to.as_str()))))
+                }
+                _ => Err(RuntimeError { message: "Str.replace expects (String, String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.contains" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(sub))) => Ok(Some(Value::Bool(s.contains(sub.as_str())))),
+                _ => Err(RuntimeError { message: "Str.contains expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.starts_with" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(prefix))) => Ok(Some(Value::Bool(s.starts_with(prefix.as_str())))),
+                _ => Err(RuntimeError { message: "Str.starts_with expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.ends_with" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(suffix))) => Ok(Some(Value::Bool(s.ends_with(suffix.as_str())))),
+                _ => Err(RuntimeError { message: "Str.ends_with expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.to_upper" => match args.first() {
+                Some(Value::String(s)) => Ok(Some(Value::String(s.to_uppercase()))),
+                _ => Err(RuntimeError { message: "Str.to_upper expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.to_lower" => match args.first() {
+                Some(Value::String(s)) => Ok(Some(Value::String(s.to_lowercase()))),
+                _ => Err(RuntimeError { message: "Str.to_lower expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.len" => match args.first() {
+                Some(Value::String(s)) => Ok(Some(Value::Int(s.chars().count() as i64))),
+                _ => Err(RuntimeError { message: "Str.len expects (String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.slice" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(s)), Some(Value::Int(start)), Some(Value::Int(end))) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let len = chars.len() as i64;
+                    let st = (*start).max(0).min(len) as usize;
+                    let en = (*end).max(0).min(len) as usize;
+                    let slice: String = chars[st.min(en)..en.max(st)].iter().collect();
+                    Ok(Some(Value::String(slice)))
+                }
+                _ => Err(RuntimeError { message: "Str.slice expects (String, Int, Int)".into(), span: None, propagated_err: None }),
+            },
+            "Str.index_of" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(sub))) => {
+                    let idx = s.find(sub.as_str()).map(|byte_idx| s[..byte_idx].chars().count() as i64).unwrap_or(-1);
+                    Ok(Some(Value::Int(idx)))
+                }
+                _ => Err(RuntimeError { message: "Str.index_of expects (String, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.pad_left" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(s)), Some(Value::Int(width)), Some(Value::String(ch))) => {
+                    let pad_char = ch.chars().next().unwrap_or(' ');
+                    let len = s.chars().count();
+                    let w = *width as usize;
+                    if len >= w {
+                        Ok(Some(Value::String(s.clone())))
+                    } else {
+                        let padding: String = std::iter::repeat(pad_char).take(w - len).collect();
+                        Ok(Some(Value::String(format!("{}{}", padding, s))))
+                    }
+                }
+                _ => Err(RuntimeError { message: "Str.pad_left expects (String, Int, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.pad_right" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(s)), Some(Value::Int(width)), Some(Value::String(ch))) => {
+                    let pad_char = ch.chars().next().unwrap_or(' ');
+                    let len = s.chars().count();
+                    let w = *width as usize;
+                    if len >= w {
+                        Ok(Some(Value::String(s.clone())))
+                    } else {
+                        let padding: String = std::iter::repeat(pad_char).take(w - len).collect();
+                        Ok(Some(Value::String(format!("{}{}", s, padding))))
+                    }
+                }
+                _ => Err(RuntimeError { message: "Str.pad_right expects (String, Int, String)".into(), span: None, propagated_err: None }),
+            },
+            "Str.repeat" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::Int(n))) => {
+                    Ok(Some(Value::String(s.repeat((*n).max(0) as usize))))
+                }
+                _ => Err(RuntimeError { message: "Str.repeat expects (String, Int)".into(), span: None, propagated_err: None }),
+            },
+            "Str.char_at" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::Int(i))) => {
+                    let chars: Vec<char> = s.chars().collect();
+                    let idx = *i as usize;
+                    match chars.get(idx) {
+                        Some(c) => Ok(Some(Value::String(c.to_string()))),
+                        None => Ok(Some(Value::String(String::new()))),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Str.char_at expects (String, Int)".into(), span: None, propagated_err: None }),
             },
             _ => Ok(None),
         }
