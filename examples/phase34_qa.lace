@@ -1,0 +1,13 @@
+fn identity(x: T) -> T [Pure] { x }
+fn swap_wrap(a: T, b: U) -> List<T> [Pure] { [a] }
+fn head(lst: List<T>) -> ? [Pure] { List.get(lst, 0) }
+
+assert_eq(identity(42), 42)
+assert_eq(identity("hello"), "hello")
+assert_eq(identity(true), true)
+
+let r1 = swap_wrap(99, "x")
+assert_eq(List.get(r1, 0), Some(99))
+
+let got = head([10, 20, 30])
+assert_eq(got, Some(10))

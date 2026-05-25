@@ -1231,6 +1231,11 @@ impl Checker {
             TypeExpr::Named { name, .. } => {
                 if name == "Dynamic" {
                     Type::Dynamic
+                } else if name.len() == 1
+                    && name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                {
+                    // Single uppercase letter = type parameter (e.g. T, U, V) → Dynamic
+                    Type::Dynamic
                 } else {
                     Type::Named(name.clone(), Vec::new())
                 }
