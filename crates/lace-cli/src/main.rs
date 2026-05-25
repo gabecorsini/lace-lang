@@ -77,6 +77,9 @@ enum Commands {
         /// Use the bytecode VM instead of the tree-walking interpreter
         #[arg(long)]
         vm: bool,
+        /// Suppress decorators; print raw output only
+        #[arg(short = 'q', long = "quiet")]
+        quiet: bool,
     },
     /// Run @test functions from a .lace file or directory
     Test {
@@ -189,7 +192,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file, checkpoint, no_warnings, no_tool_log, log_file, vm } => {
+        Commands::Run { file, checkpoint, no_warnings, no_tool_log, log_file, vm, quiet } => {
             let (file, _manifest) = resolve_entrypoint(file, "run")?;
             let source = load_source(&file)?;
 
@@ -201,7 +204,9 @@ fn run() -> Result<()> {
             } else {
                 let (program, effect_issues) = validate_source_with_warnings(&source, no_warnings)?;
 
-                print_effect_summary(&program, &effect_issues);
+                if !quiet {
+                    print_effect_summary(&program, &effect_issues);
+                }
 
                 let options = RunOptions {
                     checkpoint_path: checkpoint.map(|p| p.display().to_string()),
@@ -213,11 +218,18 @@ fn run() -> Result<()> {
 
                 match run_with_options(&program, options) {
                     Ok(value) => {
-                        println!(
-                            "{} {}",
-                            "run ok:".green().bold(),
-                            render_value(&value).bright_white()
-                        );
+                        if quiet {
+                            match &value {
+                                Value::String(s) => println!("{}", s),
+                                other => println!("{:?}", other),
+                            }
+                        } else {
+                            println!(
+                                "{} {}",
+                                "run ok:".green().bold(),
+                                render_value(&value).bright_white()
+                            );
+                        }
                     }
                     Err(err) => {
                         report_runtime_error(&source, &err);
