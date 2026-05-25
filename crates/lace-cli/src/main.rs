@@ -128,6 +128,9 @@ enum Commands {
         /// Write formatted output to stdout instead of in-place
         #[arg(long)]
         stdout: bool,
+        /// Check if file would change (exit 1 if so); useful for CI
+        #[arg(long)]
+        check: bool,
     },
     /// Generate HTML documentation from .lace source files
     Doc {
@@ -364,8 +367,8 @@ fn run() -> Result<()> {
         Commands::Explain { code } => {
             print_error_explanation(&code);
         }
-        Commands::Fmt { file, stdout } => {
-            run_fmt(&file, stdout)?;
+        Commands::Fmt { file, stdout, check } => {
+            run_fmt(&file, stdout, check)?;
         }
         Commands::Doc { path } => {
             run_doc(path)?;
@@ -1138,7 +1141,7 @@ fn print_error_explanation(code: &str) {
     }
 }
 
-fn run_fmt(file: &PathBuf, to_stdout: bool) -> Result<()> {
+fn run_fmt(file: &PathBuf, to_stdout: bool, check: bool) -> Result<()> {
     let source = load_source(file)?;
     let (program, parse_errors) = parse_program(&source);
     if !parse_errors.is_empty() {
@@ -1151,7 +1154,14 @@ fn run_fmt(file: &PathBuf, to_stdout: bool) -> Result<()> {
 
     let formatted = fmt_program(&program);
 
-    if to_stdout {
+    if check {
+        if source != formatted {
+            eprintln!("{} {} would be reformatted", "fmt check:".yellow().bold(), file.display());
+            std::process::exit(1);
+        } else {
+            println!("{} {} is already formatted", "fmt check:".green().bold(), file.display());
+        }
+    } else if to_stdout {
         print!("{formatted}");
     } else {
         fs::write(file, &formatted)
