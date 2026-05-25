@@ -804,7 +804,11 @@ impl Interpreter {
 
                 if let Some(Value::String(fn_name)) = args.first() {
                     if self.functions.contains_key(fn_name)
-                        && (call.name == "List.map" || call.name == "List.filter")
+                        && (call.name == "List.map" || call.name == "List.filter"
+                            || call.name == "List.reduce" || call.name == "List.sort_by"
+                            || call.name == "List.for_each" || call.name == "List.find"
+                            || call.name == "List.any" || call.name == "List.all"
+                            || call.name == "List.flat_map")
                     {
                         return self
                             .call_builtin(&call.name, &args)?
@@ -1553,6 +1557,168 @@ impl Interpreter {
                 } else {
                     Err(RuntimeError {
                         message: "List.fold expects (List, init, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.reduce" => {
+                let (list, init, callable) = match (args.first(), args.get(1), args.get(2)) {
+                    (Some(l), Some(i), Some(c)) => (l.clone(), i.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.reduce expects (List, init, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut acc = init;
+                    for item in items {
+                        acc = self.call_callable(callable.clone(), vec![acc, item], Span::default())?;
+                    }
+                    Ok(Some(acc))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.reduce expects (List, init, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.sort_by" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.sort_by expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    let mut sorted = items.clone();
+                    let mut sort_err: Option<RuntimeError> = None;
+                    sorted.sort_by(|a, b| {
+                        if sort_err.is_some() { return std::cmp::Ordering::Equal; }
+                        match self.call_callable(callable.clone(), vec![a.clone(), b.clone()], Span::default()) {
+                            Ok(Value::Int(n)) => {
+                                if n < 0 { std::cmp::Ordering::Less }
+                                else if n > 0 { std::cmp::Ordering::Greater }
+                                else { std::cmp::Ordering::Equal }
+                            }
+                            Ok(_) => std::cmp::Ordering::Equal,
+                            Err(e) => { sort_err = Some(e); std::cmp::Ordering::Equal }
+                        }
+                    });
+                    if let Some(e) = sort_err { return Err(e); }
+                    Ok(Some(Value::List(sorted)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.sort_by expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.for_each" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.for_each expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    for item in items {
+                        self.call_callable(callable.clone(), vec![item], Span::default())?;
+                    }
+                    Ok(Some(Value::Unit))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.for_each expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.find" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.find expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    for item in items {
+                        let keep = self.call_callable(callable.clone(), vec![item.clone()], Span::default())?;
+                        if as_bool(&keep) {
+                            return Ok(Some(Value::Variant { name: "Some".into(), payload: vec![item] }));
+                        }
+                    }
+                    Ok(Some(Value::Variant { name: "None".into(), payload: vec![] }))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.find expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.any" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.any expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    for item in items {
+                        let r = self.call_callable(callable.clone(), vec![item], Span::default())?;
+                        if as_bool(&r) { return Ok(Some(Value::Bool(true))); }
+                    }
+                    Ok(Some(Value::Bool(false)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.any expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    })
+                }
+            }
+            "List.all" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError {
+                        message: "List.all expects (List, fn_ref)".into(),
+                        span: None,
+                        propagated_err: None,
+                propagated_none: false,
+                    }),
+                };
+                if let Value::List(items) = list {
+                    for item in items {
+                        let r = self.call_callable(callable.clone(), vec![item], Span::default())?;
+                        if !as_bool(&r) { return Ok(Some(Value::Bool(false))); }
+                    }
+                    Ok(Some(Value::Bool(true)))
+                } else {
+                    Err(RuntimeError {
+                        message: "List.all expects (List, fn_ref)".into(),
                         span: None,
                         propagated_err: None,
                 propagated_none: false,

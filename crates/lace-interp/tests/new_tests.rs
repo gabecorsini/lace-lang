@@ -1180,3 +1180,85 @@ fn main() -> Option [Pure] {
         _ => panic!("expected None variant"),
     }
 }
+
+#[test]
+fn test_list_reduce() {
+    let src = r#"
+fn main() -> Int [Pure] {
+    List.reduce([1, 2, 3, 4, 5], 0, fn(acc, x) { acc + x })
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(15));
+}
+
+#[test]
+fn test_list_sort_by() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.sort_by([3, 1, 4, 1, 5, 9, 2, 6], fn(a, b) { a - b })
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::List(vec![
+        Value::Int(1), Value::Int(1), Value::Int(2), Value::Int(3),
+        Value::Int(4), Value::Int(5), Value::Int(6), Value::Int(9)
+    ]));
+}
+
+#[test]
+fn test_list_find() {
+    let src = r#"
+fn main() -> Option [Pure] {
+    List.find([1, 2, 3, 4, 5], fn(x) { x > 3 })
+}
+"#;
+    let result = run(src).unwrap();
+    match result {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Some");
+            assert_eq!(payload[0], Value::Int(4));
+        }
+        _ => panic!("expected Some(4)"),
+    }
+}
+
+#[test]
+fn test_list_any_all() {
+    let src = r#"
+fn main() -> Bool [Pure] {
+    let has_even = List.any([1, 3, 4, 7], fn(x) { x % 2 == 0 })
+    let all_pos = List.all([1, 2, 3, 4], fn(x) { x > 0 })
+    has_even && all_pos
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Bool(true));
+}
+
+#[test]
+fn test_list_flat_map() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.flat_map([1, 2, 3], fn(x) { [x, x * 2] })
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::List(vec![
+        Value::Int(1), Value::Int(2),
+        Value::Int(2), Value::Int(4),
+        Value::Int(3), Value::Int(6),
+    ]));
+}
+
+#[test]
+fn test_list_map_filter_chain() {
+    let src = r#"
+fn main() -> List [Pure] {
+    let evens = List.filter([1, 2, 3, 4, 5, 6], fn(x) { x % 2 == 0 })
+    List.map(evens, fn(x) { x * 2 })
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::List(vec![Value::Int(4), Value::Int(8), Value::Int(12)]));
+}

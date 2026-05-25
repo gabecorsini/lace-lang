@@ -1,0 +1,11 @@
+fn main() -> Unit [IO] {
+    let nums = [1, 2, 3, 4, 5, 6]
+    let evens = List.filter(nums, fn(x) { x % 2 == 0 })
+    let doubled = List.map(evens, fn(x) { x * 2 })
+    let total = List.reduce(doubled, 0, fn(acc, x) { acc + x })
+    let sorted = List.sort_by([3, 1, 4, 1, 5], fn(a, b) { a - b })
+    let found = List.find(nums, fn(x) { x > 4 })
+    let has_big = List.any(nums, fn(x) { x > 5 })
+    let all_pos = List.all(nums, fn(x) { x > 0 })
+    let flat = List.flat_map([1, 2, 3], fn(x) { [x, x] })
+}
