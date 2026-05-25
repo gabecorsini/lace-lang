@@ -68,7 +68,7 @@ fn process_feed(url: String, source: String) -> String [IO] {
         let hay = (title ++ " " ++ extract_tag("description", block)).to_lower()
         let score = score_hay(hay)
         if score >= 6 {
-          Some("[" ++ source ++ "] " ++ title ++ "\n" ++ link ++ "\nScore: " ++ to_string(score))
+          Some("[${source}] ${title}\n${link}\nScore: ${score}")
         } else {
           None()
         }
