@@ -1,0 +1,31 @@
+# Phase 33 QA: Time.parse_date and Time.parse fallback
+
+# Test 1: Time.parse_date with a valid date string -> Ok
+let r1 = Time.parse_date("2025-01-15", "%Y-%m-%d")
+match r1 {
+    Ok(s) => assert_eq(s, "2025-01-15"),
+    Err(e) => assert_eq("should not error", e),
+}
+
+# Test 2: Time.parse_date with an invalid date string -> Err
+let r2 = Time.parse_date("bad-date", "%Y-%m-%d")
+match r2 {
+    Ok(_) => assert_eq("should have errored", "but got Ok"),
+    Err(_) => assert_eq(1, 1),
+}
+
+# Test 3: Time.parse with full datetime (existing behavior)
+let r3 = Time.parse("2025-01-15T10:30:00", "%Y-%m-%dT%H:%M:%S")
+match r3 {
+    Ok(_) => assert_eq(1, 1),
+    Err(e) => assert_eq("should not error", e),
+}
+
+# Test 4: Time.parse with date-only string (fallback)
+let r4 = Time.parse("2025-01-15", "%Y-%m-%d")
+match r4 {
+    Ok(_) => assert_eq(1, 1),
+    Err(e) => assert_eq("should not error via fallback", e),
+}
+
+print("Phase 33 QA: all assertions passed!")

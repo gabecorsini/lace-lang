@@ -317,3 +317,46 @@ fn test_int_div_negative() {
     assert_eq!(run(src).unwrap(), Value::Int(-4));
 }
 
+#[test]
+fn test_time_parse_date_valid() {
+    let src = r#"
+fn main() -> String [IO] {
+    let r = Time.parse_date("2025-01-15", "%Y-%m-%d")
+    match r {
+        Ok(s) => s,
+        Err(_) => "error",
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("2025-01-15".into()));
+}
+
+#[test]
+fn test_time_parse_date_invalid() {
+    let src = r#"
+fn main() -> String [IO] {
+    let r = Time.parse_date("not-a-date", "%Y-%m-%d")
+    match r {
+        Ok(_) => "unexpected ok",
+        Err(_) => "got error",
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("got error".into()));
+}
+
+#[test]
+fn test_time_parse_fallback_date_only() {
+    // Time.parse with a date-only string should succeed via fallback
+    let src = r#"
+fn main() -> String [IO] {
+    let r = Time.parse("2025-01-15", "%Y-%m-%d")
+    match r {
+        Ok(_) => "ok",
+        Err(e) => e,
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("ok".into()));
+}
+

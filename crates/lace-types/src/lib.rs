@@ -483,6 +483,13 @@ impl Checker {
         );
         // Regex stdlib
         self.scopes[0].vars.insert("Regex".into(), Type::Dynamic);
+        // Time stdlib
+        self.scopes[0].vars.insert("Time".into(), Type::Dynamic);
+        self.fn_sigs.insert("Time.now".into(), (vec![], Type::Dynamic));
+        self.fn_sigs.insert("Time.format".into(), (vec![Type::Dynamic, Type::String], Type::String));
+        self.fn_sigs.insert("Time.parse".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Time.parse_date".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Time.since".into(), (vec![Type::Dynamic], Type::Dynamic));
         self.fn_sigs.insert("Regex.is_match".into(), (vec![Type::String, Type::String], Type::Dynamic));
         self.fn_sigs.insert("Regex.find".into(), (vec![Type::String, Type::String], Type::Dynamic));
         self.fn_sigs.insert("Regex.find_all".into(), (vec![Type::String, Type::String], Type::Dynamic));

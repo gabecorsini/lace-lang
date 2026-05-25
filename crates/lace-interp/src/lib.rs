@@ -2729,10 +2729,28 @@ impl Interpreter {
                 (Some(Value::String(s)), Some(Value::String(fmt))) => {
                     match NaiveDateTime::parse_from_str(s, fmt) {
                         Ok(ndt) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(ndt.and_utc().timestamp())] })),
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Err(_) => {
+                            // Fallback: try date-only by appending T00:00:00
+                            let s2 = format!("{}T00:00:00", s);
+                            match NaiveDateTime::parse_from_str(&s2, "%Y-%m-%dT%H:%M:%S") {
+                                Ok(ndt) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(ndt.and_utc().timestamp())] })),
+                                Err(e2) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e2.to_string())] })),
+                            }
+                        }
                     }
                 }
                 _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Time.parse_date" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(fmt))) => {
+                    let s2 = format!("{} 00:00:00", s);
+                    let fmt2 = format!("{} %H:%M:%S", fmt);
+                    match NaiveDateTime::parse_from_str(&s2, &fmt2) {
+                        Ok(_) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::String(s.clone())] })),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Time.parse_date expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Time.since" => match args.first() {
                 Some(Value::Int(ts)) => {
