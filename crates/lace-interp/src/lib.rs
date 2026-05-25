@@ -1,5 +1,69 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let la = a.len();
+    let lb = b.len();
+    let mut matrix = vec![vec![0usize; lb + 1]; la + 1];
+    for i in 0..=la { matrix[i][0] = i; }
+    for j in 0..=lb { matrix[0][j] = j; }
+    for i in 1..=la {
+        for j in 1..=lb {
+            let cost = if a.as_bytes()[i-1] == b.as_bytes()[j-1] { 0 } else { 1 };
+            matrix[i][j] = (matrix[i-1][j] + 1)
+                .min(matrix[i][j-1] + 1)
+                .min(matrix[i-1][j-1] + cost);
+        }
+    }
+    matrix[la][lb]
+}
+
+fn did_you_mean_method(qualified: &str) -> Option<String> {
+    const KNOWN_METHODS: &[&str] = &[
+        "Async.all", "Async.await_handle", "Async.race", "Async.spawn",
+        "Env.get", "Env.set",
+        "File.exists", "File.read", "File.write",
+        "Fs.append", "Fs.delete", "Fs.exists", "Fs.list_dir", "Fs.read", "Fs.write",
+        "Http.get", "Http.get_header", "Http.post", "Http.post_json",
+        "Http.response", "Http.serve", "Http.serve_routes",
+        "Json.get", "Json.index", "Json.keys", "Json.parse", "Json.stringify", "Json.validate",
+        "List.all", "List.any", "List.contains", "List.filter", "List.filter_map",
+        "List.find", "List.flat_map", "List.fold", "List.for_each", "List.get",
+        "List.join", "List.length", "List.map", "List.max", "List.min", "List.range",
+        "List.reduce", "List.sort", "List.sort_by", "List.sum", "List.zip",
+        "List.append", "List.prepend", "List.reverse", "List.unique", "List.flatten",
+        "Map.contains_key", "Map.entries", "Map.get", "Map.insert", "Map.keys",
+        "Map.length", "Map.new", "Map.remove", "Map.values",
+        "Process.run", "Process.run_args",
+        "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
+        "Regex.replace", "Regex.replace_all",
+        "Str.char_at", "Str.contains", "Str.ends_with", "Str.index_of", "Str.join",
+        "Str.len", "Str.pad_left", "Str.pad_right", "Str.repeat", "Str.replace",
+        "Str.slice", "Str.split", "Str.starts_with", "Str.to_lower", "Str.to_upper", "Str.trim",
+        "Time.format", "Time.now", "Time.now_ms", "Time.parse", "Time.parse_date", "Time.since",
+    ];
+    let best = KNOWN_METHODS.iter()
+        .map(|&m| (m, levenshtein(qualified, m)))
+        .min_by_key(|&(_, d)| d);
+    if let Some((suggestion, dist)) = best {
+        if dist <= 3 && suggestion != qualified {
+            return Some(suggestion.to_string());
+        }
+    }
+    None
+}
+
+fn did_you_mean_ident(name: &str, scope_keys: &[String]) -> Option<String> {
+    let best = scope_keys.iter()
+        .map(|k| (k, levenshtein(name, k)))
+        .min_by_key(|&(_, d)| d);
+    if let Some((suggestion, dist)) = best {
+        if dist <= 3 && suggestion.as_str() != name {
+            return Some(suggestion.clone());
+        }
+    }
+    None
+}
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -171,6 +235,16 @@ impl Env {
             }
         }
         None
+    }
+
+    fn keys(&self) -> Vec<String> {
+        let mut keys = std::collections::HashSet::new();
+        for scope in &self.scopes {
+            for k in scope.keys() {
+                keys.insert(k.clone());
+            }
+        }
+        keys.into_iter().collect()
     }
 }
 
@@ -755,8 +829,15 @@ impl Interpreter {
                     // Allow bare function names to be used as first-class references
                     Ok(Value::String(name.clone()))
                 } else {
+                    let scope_keys: Vec<String> = self.env.keys();
+                    let suggestion = did_you_mean_ident(name, &scope_keys);
+                    let message = if let Some(s) = suggestion {
+                        format!("unknown identifier '{}' — did you mean '{}'?", name, s)
+                    } else {
+                        format!("unknown identifier '{}'", name)
+                    };
                     Err(RuntimeError {
-                        message: format!("unknown identifier '{}'", name),
+                        message,
                         span: Some(*span),
                         propagated_err: None,
                 propagated_none: false,
@@ -3770,12 +3851,25 @@ impl Interpreter {
                 }),
             },
             "to_string" => Ok(Value::String(display_value(&target))),
-            _ => Err(RuntimeError {
-                message: format!("unsupported method '{}'", method),
-                span: Some(span),
-                propagated_err: None,
-                propagated_none: false,
-            }),
+            _ => {
+                let qualified = if let Value::String(ref module_name) = target {
+                    format!("{}.{}", module_name, method)
+                } else {
+                    method.to_string()
+                };
+                let suggestion = did_you_mean_method(&qualified);
+                let message = if let Some(s) = suggestion {
+                    format!("unsupported method '{}' — did you mean '{}'?", qualified, s)
+                } else {
+                    format!("unsupported method '{}'", qualified)
+                };
+                Err(RuntimeError {
+                    message,
+                    span: Some(span),
+                    propagated_err: None,
+                    propagated_none: false,
+                })
+            }
         }
     }
 
