@@ -671,3 +671,87 @@ fn main() -> Int [Pure] {
 "#;
     assert_eq!(run(src).unwrap(), Value::Int(42));
 }
+
+#[test]
+fn test_enum_unit_variant_match() {
+    let src = r#"
+enum Direction { North, South, East, West }
+fn main() -> String [Pure] {
+    let d = Direction.East
+    match d {
+        Direction.North => { "north" },
+        Direction.East  => { "east" },
+        _ => { "other" },
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("east".into()));
+}
+
+#[test]
+fn test_enum_tuple_variant_single() {
+    let src = r#"
+enum Shape { Circle(Float), Point, }
+fn main() -> Float [Pure] {
+    let s = Shape.Circle(3.0)
+    match s {
+        Shape.Circle(r) => { r * 2.0 },
+        Shape.Point => { 0.0 },
+        _ => { 0.0 },
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Float(6.0));
+}
+
+#[test]
+fn test_enum_tuple_variant_multi() {
+    let src = r#"
+enum Shape { Rect(Int, Int), Other, }
+fn main() -> Int [Pure] {
+    let s = Shape.Rect(4, 5)
+    match s {
+        Shape.Rect(w, h) => { w * h },
+        _ => { 0 },
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(20));
+}
+
+#[test]
+fn test_enum_unit_no_payload_match() {
+    let src = r#"
+enum Color { Red, Green, Blue, }
+fn main() -> String [Pure] {
+    let c = Color.Blue
+    match c {
+        Color.Red   => { "red" },
+        Color.Green => { "green" },
+        Color.Blue  => { "blue" },
+        _ => { "unknown" },
+    }
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("blue".into()));
+}
+
+#[test]
+fn test_enum_in_function_arg() {
+    let src = r#"
+enum Coin { Penny, Nickel, Dime, Quarter, }
+fn value(c: Coin) -> Int [Pure] {
+    match c {
+        Coin.Penny   => { 1 },
+        Coin.Nickel  => { 5 },
+        Coin.Dime    => { 10 },
+        Coin.Quarter => { 25 },
+        _ => { 0 },
+    }
+}
+fn main() -> Int [Pure] {
+    value(Coin.Dime) + value(Coin.Quarter)
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(35));
+}

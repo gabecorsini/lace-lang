@@ -1,0 +1,56 @@
+## Lace enum example — user-defined algebraic data types
+
+enum Direction { North, South, East, West }
+
+enum Shape {
+  Circle(Float),
+  Rect(Float, Float),
+  Point,
+}
+
+enum Color {
+  Rgb(Int, Int, Int),
+  Named(String),
+  Transparent,
+}
+
+# Unit variant usage
+let d = Direction.East
+let dir_name = match d {
+  Direction.North => { "north" },
+  Direction.South => { "south" },
+  Direction.East  => { "east" },
+  Direction.West  => { "west" },
+  _ => { "unknown" },
+}
+println("heading: " ++ dir_name)
+
+# Tuple variant — single payload
+fn area(s: Shape) -> Float [Pure] {
+  match s {
+    Shape.Circle(r) => { 3.14159 * r * r },
+    Shape.Rect(w, h) => { w * h },
+    Shape.Point => { 0.0 },
+    _ => { 0.0 },
+  }
+}
+
+println("circle area: " ++ area(Shape.Circle(5.0)).to_string())
+println("rect area:   " ++ area(Shape.Rect(4.0, 6.0)).to_string())
+println("point area:  " ++ area(Shape.Point).to_string())
+
+# Tuple variant — multiple payloads
+let c = Color.Rgb(255, 128, 0)
+match c {
+  Color.Rgb(r, g, b) => {
+    println("rgb(" ++ r.to_string() ++ ", " ++ g.to_string() ++ ", " ++ b.to_string() ++ ")")
+  },
+  Color.Named(name) => { println("color: " ++ name) },
+  Color.Transparent => { println("transparent") },
+  _ => { println("other") },
+}
+
+# Enums in lists
+let shapes = [Shape.Circle(1.0), Shape.Rect(2.0, 3.0), Shape.Point, Shape.Circle(4.0)]
+let areas = List.map(shapes, fn(s) { area(s) })
+println("areas: " ++ areas.to_string())

@@ -448,7 +448,18 @@ impl Parser {
             } else {
                 None
             };
-            self.expect(TokenKind::Comma)?;
+            // trailing comma is optional on last variant
+            if !self.match_tok(&TokenKind::Comma) {
+                variants.push(EnumVariant {
+                    name: vname,
+                    body,
+                    span: Span {
+                        start: vstart,
+                        end: self.prev_span().end,
+                    },
+                });
+                break;
+            }
             variants.push(EnumVariant {
                 name: vname,
                 body,
@@ -1079,47 +1090,86 @@ impl Parser {
                 return None;
             }
 
-            if self.match_tok(&TokenKind::Dot) {
-                let field_start = self.curr_span().start;
-                let name = self.expect_ident()?;
-                if self.match_tok(&TokenKind::LParen) {
-                    let mut args = Vec::new();
-                    if !self.at(&TokenKind::RParen) {
-                        loop {
-                            args.push(self.parse_expr()?);
-                            if self.match_tok(&TokenKind::Comma) {
-                                if self.at(&TokenKind::RParen) {
-                                    break;
-                                }
-                                continue;
-                            }
-                            break;
-                        }
-                    }
-                    self.expect(TokenKind::RParen)?;
-                    let span = Span {
-                        start: lhs.span().start,
-                        end: self.prev_span().end,
-                    };
-                    lhs = Expr::MethodCall(MethodCallExpr {
-                        target: Box::new(lhs),
-                        method: name,
-                        args,
-                        span,
-                    });
-                } else {
-                    let span = Span {
-                        start: lhs.span().start,
-                        end: self.prev_span().end.max(field_start),
-                    };
-                    lhs = Expr::FieldAccess {
-                        target: Box::new(lhs),
-                        field: name,
-                        span,
-                    };
-                }
-                continue;
-            }
+           if self.match_tok(&TokenKind::Dot) {
+               let field_start = self.curr_span().start;
+               // Check if next token is a TypeIdent (enum variant access: Enum.Variant or Enum.Variant(args))
+               if let TokenKind::TypeIdent(_) = self.peek_kind() {
+                   let variant_name = self.expect_type_ident()?;
+                   if self.match_tok(&TokenKind::LParen) {
+                       let mut args = Vec::new();
+                       if !self.at(&TokenKind::RParen) {
+                           loop {
+                               args.push(self.parse_expr()?);
+                               if self.match_tok(&TokenKind::Comma) {
+                                   if self.at(&TokenKind::RParen) {
+                                       break;
+                                   }
+                                   continue;
+                               }
+                               break;
+                           }
+                       }
+                       self.expect(TokenKind::RParen)?;
+                       let span = Span {
+                           start: lhs.span().start,
+                           end: self.prev_span().end,
+                       };
+                       // Enum.Variant(args) — variant constructor call
+                       lhs = Expr::FnCall(FnCallExpr {
+                           name: variant_name,
+                           type_arg: None,
+                           args,
+                           span,
+                       });
+                   } else {
+                       let span = Span {
+                           start: lhs.span().start,
+                           end: self.prev_span().end.max(field_start),
+                       };
+                       // Enum.Variant — unit variant access, represent as Ident(variant_name)
+                       lhs = Expr::Ident(variant_name, span);
+                   }
+               } else {
+                   let name = self.expect_ident()?;
+                   if self.match_tok(&TokenKind::LParen) {
+                       let mut args = Vec::new();
+                       if !self.at(&TokenKind::RParen) {
+                           loop {
+                               args.push(self.parse_expr()?);
+                               if self.match_tok(&TokenKind::Comma) {
+                                   if self.at(&TokenKind::RParen) {
+                                       break;
+                                   }
+                                   continue;
+                               }
+                               break;
+                           }
+                       }
+                       self.expect(TokenKind::RParen)?;
+                       let span = Span {
+                           start: lhs.span().start,
+                           end: self.prev_span().end,
+                       };
+                       lhs = Expr::MethodCall(MethodCallExpr {
+                           target: Box::new(lhs),
+                           method: name,
+                           args,
+                           span,
+                       });
+                   } else {
+                       let span = Span {
+                           start: lhs.span().start,
+                           end: self.prev_span().end.max(field_start),
+                       };
+                       lhs = Expr::FieldAccess {
+                           target: Box::new(lhs),
+                           field: name,
+                           span,
+                       };
+                   }
+               }
+               continue;
+           }
 
             if self.match_tok(&TokenKind::LBracket) {
                 let index = self.parse_expr()?;
@@ -1456,33 +1506,38 @@ impl Parser {
                     },
                 ))
             }
-            TokenKind::TypeIdent(name) => {
-                self.bump();
-                if self.match_tok(&TokenKind::LParen) {
-                    let mut elems = Vec::new();
-                    if !self.at(&TokenKind::RParen) {
-                        loop {
-                            elems.push(self.parse_pattern()?);
-                            if self.match_tok(&TokenKind::Comma) {
-                                if self.at(&TokenKind::RParen) {
-                                    break;
-                                }
-                                continue;
-                            }
-                            break;
-                        }
-                    }
-                    self.expect(TokenKind::RParen)?;
-                    return Some(Pattern::EnumTuple {
-                        name,
-                        elems,
-                        span: Span {
-                            start,
-                            end: self.prev_span().end,
-                        },
-                    });
-                }
-                if self.match_tok(&TokenKind::LBrace) {
+           TokenKind::TypeIdent(name) => {
+               self.bump();
+               if self.match_tok(&TokenKind::LParen) {
+                   // Check for qualified Enum.Variant — if the name was an enum type (no variants listed),
+                   // we handle that case below. Here name is either a bare Variant or an EnumName.
+                   // After bump we check for dot+TypeIdent (qualified variant)
+                   let final_name = name.clone();
+                   _ = final_name; // will use name below
+                   let mut elems = Vec::new();
+                   if !self.at(&TokenKind::RParen) {
+                       loop {
+                           elems.push(self.parse_pattern()?);
+                           if self.match_tok(&TokenKind::Comma) {
+                               if self.at(&TokenKind::RParen) {
+                                   break;
+                               }
+                               continue;
+                           }
+                           break;
+                       }
+                   }
+                   self.expect(TokenKind::RParen)?;
+                   return Some(Pattern::EnumTuple {
+                       name,
+                       elems,
+                       span: Span {
+                           start,
+                           end: self.prev_span().end,
+                       },
+                   });
+               }
+               if self.match_tok(&TokenKind::LBrace) {
                     let mut fields = Vec::new();
                     let mut rest = false;
                     while !self.at(&TokenKind::RBrace) {
@@ -1497,18 +1552,61 @@ impl Parser {
                         self.expect(TokenKind::Comma)?;
                         fields.push((fname, p));
                     }
-                    self.expect(TokenKind::RBrace)?;
-                    return Some(Pattern::Record {
-                        name,
-                        fields,
-                        rest,
-                        span: Span {
-                            start,
-                            end: self.prev_span().end,
-                        },
-                    });
-                }
-                Some(Pattern::Ident(name, self.prev_span_ast()))
+                   self.expect(TokenKind::RBrace)?;
+                   return Some(Pattern::Record {
+                       name,
+                       fields,
+                       rest,
+                       span: Span {
+                           start,
+                           end: self.prev_span().end,
+                       },
+                   });
+               }
+               // Handle qualified Enum.Variant patterns: Shape.Circle or Shape.Circle(r)
+               if self.match_tok(&TokenKind::Dot) {
+                   if let TokenKind::TypeIdent(_) = self.peek_kind() {
+                       let variant_name = self.expect_type_ident()?;
+                       if self.match_tok(&TokenKind::LParen) {
+                           let mut elems = Vec::new();
+                           if !self.at(&TokenKind::RParen) {
+                               loop {
+                                   elems.push(self.parse_pattern()?);
+                                   if self.match_tok(&TokenKind::Comma) {
+                                       if self.at(&TokenKind::RParen) {
+                                           break;
+                                       }
+                                       continue;
+                                   }
+                                   break;
+                               }
+                           }
+                           self.expect(TokenKind::RParen)?;
+                           return Some(Pattern::EnumTuple {
+                               name: variant_name,
+                               elems,
+                               span: Span {
+                                   start,
+                                   end: self.prev_span().end,
+                               },
+                           });
+                       } else {
+                           // Unit variant: Shape.North
+                           return Some(Pattern::EnumTuple {
+                               name: variant_name,
+                               elems: Vec::new(),
+                               span: Span {
+                                   start,
+                                   end: self.prev_span().end,
+                               },
+                           });
+                       }
+                   } else {
+                       self.error_here("expected variant name after '.'");
+                       return None;
+                   }
+               }
+               Some(Pattern::Ident(name, self.prev_span_ast()))
             }
             _ => {
                 self.error_here("expected pattern");
