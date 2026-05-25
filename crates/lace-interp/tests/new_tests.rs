@@ -1012,3 +1012,82 @@ fn main() -> Int [Pure] {
     let result = run(src).unwrap();
     assert_eq!(result, Value::Int(15));
 }
+
+#[test]
+fn test_record_basic() {
+    let src = r#"
+record Point { x: Float, y: Float, }
+fn main() -> Float [Pure] {
+    let p = Point { x: 1.0, y: 2.0 }
+    p.x
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Float(1.0));
+}
+
+#[test]
+fn test_record_in_function() {
+    let src = r#"
+record Person { name: String, age: Int, }
+fn greet(p: Person) -> String [Pure] {
+    "Hello " ++ p.name
+}
+fn main() -> String [Pure] {
+    let person = Person { name: "Alice", age: 30, }
+    greet(person)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::String("Hello Alice".into()));
+}
+
+#[test]
+fn test_record_return() {
+    let src = r#"
+record Point { x: Float, y: Float, }
+fn make_point(x: Float, y: Float) -> Point [Pure] {
+    Point { x: x, y: y, }
+}
+fn main() -> Float [Pure] {
+    let p = make_point(3.0, 4.0)
+    p.y
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Float(4.0));
+}
+
+#[test]
+fn test_record_in_list() {
+    let src = r#"
+record Item { value: Int, }
+fn main() -> Int [Pure] {
+    let items = [Item { value: 10, }, Item { value: 20, }]
+    let first = List.get(items, 0)
+    match first {
+        Some(x) => x.value,
+        None => 0,
+    }
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Int(10));
+}
+
+#[test]
+fn test_record_field_update() {
+    // Test that we can read multiple fields
+    let src = r#"
+record Vec2 { x: Float, y: Float, }
+fn magnitude_sq(v: Vec2) -> Float [Pure] {
+    v.x * v.x + v.y * v.y
+}
+fn main() -> Float [Pure] {
+    let v = Vec2 { x: 3.0, y: 4.0, }
+    magnitude_sq(v)
+}
+"#;
+    let result = run(src).unwrap();
+    assert_eq!(result, Value::Float(25.0));
+}

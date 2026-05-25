@@ -1620,6 +1620,27 @@ impl Interpreter {
                     propagated_err: None,
                 }),
             },
+            "List.get" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(idx))) => {
+                    let i = *idx as usize;
+                    if i < items.len() {
+                        Ok(Some(Value::Variant {
+                            name: "Some".into(),
+                            payload: vec![items[i].clone()],
+                        }))
+                    } else {
+                        Ok(Some(Value::Variant {
+                            name: "None".into(),
+                            payload: vec![],
+                        }))
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "List.get expects (List, Int)".into(),
+                    span: None,
+                    propagated_err: None,
+                }),
+            },
             // Map stdlib
             "Map.new" => Ok(Some(Value::Map(HashMap::new()))),
             "Map.insert" => match (args.first(), args.get(1), args.get(2)) {
