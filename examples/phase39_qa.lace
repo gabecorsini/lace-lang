@@ -1,0 +1,25 @@
+# Parse a JSON object
+let result = Json.parse("{\"name\": \"Alice\", \"age\": 30}")
+match result {
+  Ok(obj) => {
+    let name = Map.get(obj, "name")
+    assert_eq(name, Some("Alice"))
+    let age = Map.get(obj, "age")
+    assert_eq(age, Some(30))
+  },
+  Err(e) => assert_eq("should not error", e),
+}
+
+# Parse a JSON array
+let arr_result = Json.parse("[1, 2, 3]")
+match arr_result {
+  Ok(arr) => assert_eq(List.length(arr), 3),
+  Err(e) => assert_eq("should not error", e),
+}
+
+# Parse error
+let bad = Json.parse("{invalid}")
+match bad {
+  Ok(_) => assert_eq("should have errored", "ok"),
+  Err(_) => assert_eq(1, 1),
+}
