@@ -1,0 +1,11 @@
+fn main() -> Unit [IO] {
+    let text = "Contact alice@example.com or bob@test.org for help"
+    let emails = Regex.find_all("[a-z0-9]+@[a-z0-9]+\\.[a-z]+", text)
+    let cleaned = Regex.replace_all("[0-9]", "abc123def456", "N")
+    let has_digits = Regex.is_match("[0-9]", "hello world")
+    let data = Map.insert(Map.insert(Map.new(), "name", "Alice"), "score", 42)
+    let schema = Map.insert(Map.insert(Map.new(), "name", "string"), "score", "number")
+    let valid = Json.validate(data, schema)
+    let bad_data = Map.insert(Map.new(), "name", "Bob")
+    let invalid = Json.validate(bad_data, schema)
+}

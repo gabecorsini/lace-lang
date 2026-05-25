@@ -6,6 +6,7 @@ use std::process::{Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use regex::Regex as StdRegex;
 
 pub mod tool_log;
 pub use tool_log::ToolLogger;
@@ -272,6 +273,7 @@ impl Interpreter {
         self.env.define("Fs".into(), Value::String("Fs".into()));
         self.env.define("Time".into(), Value::String("Time".into()));
         self.env.define("Str".into(), Value::String("Str".into()));
+        self.env.define("Regex".into(), Value::String("Regex".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -324,6 +326,7 @@ impl Interpreter {
         self.env.define("Fs".into(), Value::String("Fs".into()));
         self.env.define("Time".into(), Value::String("Time".into()));
         self.env.define("Str".into(), Value::String("Str".into()));
+        self.env.define("Regex".into(), Value::String("Regex".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -2224,6 +2227,113 @@ impl Interpreter {
                     }))
                 },
                 _ => Err(RuntimeError { message: "Json.index expects (List, Int)".into(), span: None, propagated_err: None, propagated_none: false })
+            },
+            // ── Regex stdlib ─────────────────────────────────────────────────
+            "Regex.is_match" => match (args.first(), args.get(1)) {
+                (Some(Value::String(pattern)), Some(Value::String(text))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => Ok(Some(Value::Bool(re.is_match(text)))),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.is_match expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Regex.find" => match (args.first(), args.get(1)) {
+                (Some(Value::String(pattern)), Some(Value::String(text))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => match re.find(text) {
+                            Some(m) => Ok(Some(Value::Variant { name: "Some".into(), payload: vec![Value::String(m.as_str().to_string())] })),
+                            None => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
+                        },
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.find expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Regex.find_all" => match (args.first(), args.get(1)) {
+                (Some(Value::String(pattern)), Some(Value::String(text))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => {
+                            let matches: Vec<Value> = re.find_iter(text).map(|m| Value::String(m.as_str().to_string())).collect();
+                            Ok(Some(Value::List(matches)))
+                        }
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.find_all expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Regex.replace" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(pattern)), Some(Value::String(text)), Some(Value::String(replacement))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => Ok(Some(Value::String(re.replacen(text, 1, replacement.as_str()).to_string()))),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.replace expects (String, String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Regex.replace_all" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::String(pattern)), Some(Value::String(text)), Some(Value::String(replacement))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => Ok(Some(Value::String(re.replace_all(text, replacement.as_str()).to_string()))),
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.replace_all expects (String, String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Regex.captures" => match (args.first(), args.get(1)) {
+                (Some(Value::String(pattern)), Some(Value::String(text))) => {
+                    match StdRegex::new(pattern) {
+                        Ok(re) => match re.captures(text) {
+                            Some(caps) => {
+                                let groups: Vec<Value> = caps.iter().map(|m| match m {
+                                    Some(m) => Value::String(m.as_str().to_string()),
+                                    None => Value::String("".to_string()),
+                                }).collect();
+                                Ok(Some(Value::List(groups)))
+                            }
+                            None => Ok(Some(Value::List(vec![]))),
+                        },
+                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("invalid regex: {}", e))] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Regex.captures expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // ── Json.validate ────────────────────────────────────────────────
+            "Json.validate" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(data)), Some(Value::Map(schema))) => {
+                    let mut result: Result<Option<Value>, RuntimeError> = Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] }));
+                    for (key, expected_type) in schema {
+                        if let Value::String(type_str) = expected_type {
+                            match data.get(key) {
+                                None => {
+                                    result = Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("field {}: missing", key))] }));
+                                    break;
+                                }
+                                Some(val) => {
+                                    let actual_type = match val {
+                                        Value::String(_) => "string",
+                                        Value::Int(_) => "int",
+                                        Value::Float(_) => "float",
+                                        Value::Bool(_) => "bool",
+                                        Value::List(_) => "list",
+                                        Value::Map(_) => "map",
+                                        _ => "unknown",
+                                    };
+                                    let matches = match type_str.as_str() {
+                                        "number" => matches!(val, Value::Int(_) | Value::Float(_)),
+                                        t => actual_type == t,
+                                    };
+                                    if !matches {
+                                        result = Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(format!("field {}: expected {} got {}", key, type_str, actual_type))] }));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    result
+                }
+                _ => Err(RuntimeError { message: "Json.validate expects (Map, Map)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             // Env stdlib
             "Env.get" => match args.first() {

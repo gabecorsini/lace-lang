@@ -1262,3 +1262,90 @@ fn main() -> List [Pure] {
     let result = run(src).unwrap();
     assert_eq!(result, Value::List(vec![Value::Int(4), Value::Int(8), Value::Int(12)]));
 }
+
+// ── Phase 29: Regex + Json.validate ──────────────────────────────────────────
+
+#[test]
+fn test_regex_is_match() {
+    let src = r#"
+fn main() -> Bool [Pure] {
+    Regex.is_match("[0-9]+", "abc123def")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_regex_find() {
+    let src = r#"
+fn main() -> Option [Pure] {
+    Regex.find("[a-z]+@[a-z]+\\.[a-z]+", "contact alice@example.com today")
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Some");
+            assert_eq!(payload[0], Value::String("alice@example.com".into()));
+        }
+        _ => panic!("expected Some"),
+    }
+}
+
+#[test]
+fn test_regex_find_all() {
+    let src = r#"
+fn main() -> List [Pure] {
+    Regex.find_all("[0-9]+", "a1b22c333")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::List(vec![
+        Value::String("1".into()),
+        Value::String("22".into()),
+        Value::String("333".into()),
+    ]));
+}
+
+#[test]
+fn test_regex_replace_all() {
+    let src = r#"
+fn main() -> String [Pure] {
+    Regex.replace_all("[0-9]+", "a1b22c333", "N")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("aNbNcN".into()));
+}
+
+#[test]
+fn test_json_validate_ok() {
+    let src = r#"
+fn main() -> Result [Pure] {
+    let data = Map.insert(Map.insert(Map.new(), "name", "Alice"), "age", 30)
+    let schema = Map.insert(Map.insert(Map.new(), "name", "string"), "age", "number")
+    Json.validate(data, schema)
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, .. } => assert_eq!(name, "Ok"),
+        _ => panic!("expected Ok"),
+    }
+}
+
+#[test]
+fn test_json_validate_err() {
+    let src = r#"
+fn main() -> Result [Pure] {
+    let data = Map.insert(Map.new(), "name", "Alice")
+    let schema = Map.insert(Map.insert(Map.new(), "name", "string"), "age", "number")
+    Json.validate(data, schema)
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Err");
+            if let Value::String(msg) = &payload[0] {
+                assert!(msg.contains("age"), "error should mention 'age': {}", msg);
+            }
+        }
+        _ => panic!("expected Err"),
+    }
+}

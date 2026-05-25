@@ -459,6 +459,15 @@ impl Checker {
             "Json.keys".into(),
             (vec![Type::Dynamic], Type::List(Box::new(Type::String))),
         );
+        // Regex stdlib
+        self.scopes[0].vars.insert("Regex".into(), Type::Dynamic);
+        self.fn_sigs.insert("Regex.is_match".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Regex.find".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Regex.find_all".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Regex.replace".into(), (vec![Type::String, Type::String, Type::String], Type::String));
+        self.fn_sigs.insert("Regex.replace_all".into(), (vec![Type::String, Type::String, Type::String], Type::String));
+        self.fn_sigs.insert("Regex.captures".into(), (vec![Type::String, Type::String], Type::Dynamic));
+        self.fn_sigs.insert("Json.validate".into(), (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic));
         // Env stdlib
         self.scopes[0].vars.insert("Env".into(), Type::Dynamic);
         self.fn_sigs.insert(
