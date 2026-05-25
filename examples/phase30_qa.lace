@@ -1,0 +1,5 @@
+fn main() -> Unit [IO] {
+    let result = Process.run("echo hello from lace")
+    let cat = Process.run("cat /etc/hostname")
+    let bad = Process.run("false")
+}

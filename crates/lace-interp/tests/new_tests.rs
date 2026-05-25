@@ -1349,3 +1349,49 @@ fn main() -> Result [Pure] {
         _ => panic!("expected Err"),
     }
 }
+
+#[test]
+fn test_process_run_success() {
+    let src = r#"
+fn main() -> Result [IO] {
+    Process.run("echo hello")
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Ok");
+            assert_eq!(payload[0], Value::String("hello".into()));
+        }
+        _ => panic!("expected Ok"),
+    }
+}
+
+#[test]
+fn test_process_run_failure() {
+    let src = r#"
+fn main() -> Result [IO] {
+    Process.run("exit 1")
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, .. } => assert_eq!(name, "Err"),
+        _ => panic!("expected Err"),
+    }
+}
+
+#[test]
+fn test_process_run_chained() {
+    let src = r#"
+fn main() -> Result [IO] {
+    let output = Process.run("echo world")?
+    Ok(output)
+}
+"#;
+    match run(src).unwrap() {
+        Value::Variant { name, payload } => {
+            assert_eq!(name, "Ok");
+            assert_eq!(payload[0], Value::String("world".into()));
+        }
+        _ => panic!("expected Ok"),
+    }
+}

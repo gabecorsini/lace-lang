@@ -441,6 +441,20 @@ impl Checker {
             "Http.post_json".into(),
             (vec![Type::String, Type::Dynamic], Type::Dynamic),
         );
+        self.fn_sigs.insert(
+            "Http.serve".into(),
+            (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic),
+        );
+        // Process stdlib
+        self.scopes[0].vars.insert("Process".into(), Type::Dynamic);
+        self.fn_sigs.insert(
+            "Process.run".into(),
+            (vec![Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Process.run_args".into(),
+            (vec![Type::String, Type::Dynamic], Type::Dynamic),
+        );
         // Json stdlib
         self.scopes[0].vars.insert("Json".into(), Type::Dynamic);
         self.fn_sigs.insert(

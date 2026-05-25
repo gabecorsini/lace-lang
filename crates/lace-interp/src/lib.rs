@@ -274,6 +274,7 @@ impl Interpreter {
         self.env.define("Time".into(), Value::String("Time".into()));
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
+        self.env.define("Process".into(), Value::String("Process".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -327,6 +328,7 @@ impl Interpreter {
         self.env.define("Time".into(), Value::String("Time".into()));
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
+        self.env.define("Process".into(), Value::String("Process".into()));
 
         self.load_imports(program)?;
         self.register_items(program);
@@ -2162,6 +2164,158 @@ impl Interpreter {
                     span: None,
                     propagated_err: None,
                 propagated_none: false,
+                }),
+            },
+            // Http.serve
+            "Http.serve" => {
+                use std::io::{BufRead, BufReader, Write};
+                use std::net::TcpListener;
+                let port = match args.first() {
+                    Some(Value::Int(p)) => *p,
+                    _ => return Err(RuntimeError {
+                        message: "Http.serve expects (Int, Fn)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let handler = match args.get(1) {
+                    Some(v) => v.clone(),
+                    None => return Err(RuntimeError {
+                        message: "Http.serve expects (Int, Fn)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let addr = format!("0.0.0.0:{}", port);
+                let listener = TcpListener::bind(&addr).map_err(|e| RuntimeError {
+                    message: format!("Http.serve: failed to bind {}: {}", addr, e),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                })?;
+                for stream in listener.incoming() {
+                    match stream {
+                        Ok(mut s) => {
+                            let reader = BufReader::new(s.try_clone().unwrap());
+                            let first_line = reader.lines().next()
+                                .and_then(|l| l.ok())
+                                .unwrap_or_default();
+                            // parse path from "GET /path HTTP/1.1"
+                            let path = first_line.split_whitespace().nth(1)
+                                .unwrap_or("/")
+                                .to_string();
+                            let response_val = self.call_callable(
+                                handler.clone(),
+                                vec![Value::String(path)],
+                                Span::default(),
+                            )?;
+                            let body = match response_val {
+                                Value::String(b) => b,
+                                v => format!("{:?}", v),
+                            };
+                            let http_response = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\n\r\n{}",
+                                body.len(), body
+                            );
+                            let _ = s.write_all(http_response.as_bytes());
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Ok(Some(Value::Unit))
+            }
+            // Process.run
+            "Process.run" => match args.first() {
+                Some(Value::String(cmd)) => {
+                    let output = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .output()
+                        .map_err(|e| RuntimeError {
+                            message: format!("Process.run error: {}", e),
+                            span: None,
+                            propagated_err: None,
+                            propagated_none: false,
+                        })?;
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout)
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
+                        Ok(Some(Value::Variant {
+                            name: "Ok".into(),
+                            payload: vec![Value::String(stdout)],
+                        }))
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr)
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
+                        let err_msg = if stderr.is_empty() {
+                            format!("exit code {}", output.status.code().unwrap_or(-1))
+                        } else {
+                            stderr
+                        };
+                        Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(err_msg)],
+                        }))
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Process.run expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            // Process.run_args
+            "Process.run_args" => match (args.first(), args.get(1)) {
+                (Some(Value::String(cmd)), Some(Value::List(arg_list))) => {
+                    let mut command = std::process::Command::new(cmd.as_str());
+                    for a in arg_list.iter() {
+                        if let Value::String(s) = a {
+                            command.arg(s.as_str());
+                        }
+                    }
+                    let output = command.output().map_err(|e| RuntimeError {
+                        message: format!("Process.run_args error: {}", e),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    })?;
+                    if output.status.success() {
+                        let stdout = String::from_utf8_lossy(&output.stdout)
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
+                        Ok(Some(Value::Variant {
+                            name: "Ok".into(),
+                            payload: vec![Value::String(stdout)],
+                        }))
+                    } else {
+                        let stderr = String::from_utf8_lossy(&output.stderr)
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
+                        let err_msg = if stderr.is_empty() {
+                            format!("exit code {}", output.status.code().unwrap_or(-1))
+                        } else {
+                            stderr
+                        };
+                        Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(err_msg)],
+                        }))
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Process.run_args expects (String, List)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
                 }),
             },
             // Json stdlib
