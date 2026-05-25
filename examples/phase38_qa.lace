@@ -1,0 +1,34 @@
+# Phase 38 QA
+
+# Process.env
+let path = Process.env("PATH")
+assert_eq(path != None(), true)  # PATH should always exist
+
+let missing = Process.env("LACE_QA_DEFINITELY_NOT_SET_XYZ")
+assert_eq(missing, None())
+
+# File.write + File.read roundtrip
+let wr = File.write("/tmp/lace_qa_test.txt", "hello lace")
+let content = File.read("/tmp/lace_qa_test.txt")
+assert_eq(content, Ok("hello lace"))
+
+# File.append
+let _ = File.append("/tmp/lace_qa_test.txt", " appended")
+let content2 = File.read("/tmp/lace_qa_test.txt")
+assert_eq(content2, Ok("hello lace appended"))
+
+# Map.keys / Map.values
+let m = Map.new()
+let m = Map.insert(m, "a", 1)
+let m = Map.insert(m, "b", 2)
+let keys = Map.keys(m)
+assert_eq(List.length(keys), 2)
+let vals = Map.values(m)
+assert_eq(List.length(vals), 2)
+
+# print() with non-String values
+print(42)
+print(true)
+print(3.14)
+
+println("phase38 QA passed")

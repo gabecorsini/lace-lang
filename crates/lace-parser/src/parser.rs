@@ -190,7 +190,8 @@ impl Parser {
             | TokenKind::Match
             | TokenKind::If
             | TokenKind::Return
-            | TokenKind::Ident(_) => {
+            | TokenKind::Ident(_)
+            | TokenKind::TypeIdent(_) => {
                 // drop doc/ann for statements (they have no use)
                 let _ = (doc, ann);
                 self.parse_stmt().map(TopLevelItem::Statement)
@@ -1320,7 +1321,12 @@ impl Parser {
             }
             TokenKind::StringLit(v) => {
                 self.bump();
-                Some(Expr::Literal(Literal::String(v), self.prev_span_ast()))
+                let span = self.prev_span_ast();
+                if v.contains("${") {
+                    self.parse_interpolated_string(&v, span)
+                } else {
+                    Some(Expr::Literal(Literal::String(v), span))
+                }
             }
             TokenKind::BoolLit(v) => {
                 self.bump();
@@ -1335,6 +1341,112 @@ impl Parser {
                 None
             }
         }
+    }
+
+    /// Parse a string containing `${expr}` interpolation into a concat expression tree.
+    fn parse_interpolated_string(&mut self, s: &str, span: Span) -> Option<Expr> {
+        // Split the string into literal/expr parts
+        let mut parts: Vec<Expr> = Vec::new();
+        let mut rest = s;
+        while let Some(start_idx) = rest.find("${") {
+            // Push literal prefix if non-empty
+            let literal = &rest[..start_idx];
+            if !literal.is_empty() {
+                parts.push(Expr::Literal(Literal::String(literal.to_string()), span.clone()));
+            }
+            rest = &rest[start_idx + 2..];
+            // Find matching closing brace (handle nesting)
+            let mut depth = 1usize;
+            let mut end_idx = None;
+            let chars: Vec<char> = rest.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                match chars[i] {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end_idx = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let end_idx = end_idx?;
+            let byte_end = rest
+                .char_indices()
+                .nth(end_idx)
+                .map(|(b, _)| b)
+                .unwrap_or(rest.len());
+            let expr_src = &rest[..byte_end];
+            // Advance rest past the closing brace
+            let after_byte = rest
+                .char_indices()
+                .nth(end_idx + 1)
+                .map(|(b, _)| b)
+                .unwrap_or(rest.len());
+            rest = &rest[after_byte..];
+            // Parse the inner expression via a sub-parse
+            let (prog, errs) = crate::parse_program(expr_src);
+            if !errs.is_empty() || prog.is_none() {
+                self.errors.push(ParseError::Message {
+                    message: format!("invalid expression in string interpolation: `{expr_src}`"),
+                    span_start: span.start,
+                    span_end: span.end,
+                });
+                return None;
+            }
+            let prog = prog.unwrap();
+            // Extract the expression from the program (expect a single expr-statement)
+            let inner_expr = if let Some(item) = prog.items.first() {
+                match item {
+                    TopLevelItem::Statement(Stmt::Expr(e)) => e.clone(),
+                    _ => {
+                        self.errors.push(ParseError::Message {
+                            message: format!("expected expression in string interpolation: `{expr_src}`"),
+                            span_start: span.start,
+                            span_end: span.end,
+                        });
+                        return None;
+                    }
+                }
+            } else {
+                self.errors.push(ParseError::Message {
+                    message: format!("empty expression in string interpolation"),
+                    span_start: span.start,
+                    span_end: span.end,
+                });
+                return None;
+            };
+            // Wrap in to_string() call
+            let to_str = Expr::FnCall(FnCallExpr {
+                name: "to_string".to_string(),
+                type_arg: None,
+                args: vec![inner_expr],
+                span: span.clone(),
+            });
+            parts.push(to_str);
+        }
+        // Push remaining literal suffix
+        if !rest.is_empty() {
+            parts.push(Expr::Literal(Literal::String(rest.to_string()), span.clone()));
+        }
+        // Fold parts into concat chain
+        if parts.is_empty() {
+            return Some(Expr::Literal(Literal::String(String::new()), span));
+        }
+        let mut result = parts.remove(0);
+        for part in parts {
+            result = Expr::Binary {
+                left: Box::new(result),
+                op: BinaryOp::Concat,
+                right: Box::new(part),
+                span: span.clone(),
+            };
+        }
+        Some(result)
     }
 
     fn parse_closure_expr(&mut self) -> Option<Expr> {

@@ -1,0 +1,14 @@
+let name = "Lace"
+let version = 1
+let msg = "Hello from ${name} v${version}!"
+assert_eq(msg, "Hello from Lace v1!")
+
+let a = 3
+let b = 4
+let math = "${a} + ${b} = ${a + b}"
+assert_eq(math, "3 + 4 = 7")
+
+# Nested call
+let items = [1, 2, 3]
+let summary = "List has ${List.length(items)} items"
+assert_eq(summary, "List has 3 items")

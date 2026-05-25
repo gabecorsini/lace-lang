@@ -23,9 +23,10 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Async.all", "Async.await_handle", "Async.race", "Async.spawn",
         "Env.get", "Env.set",
         "File.exists", "File.read", "File.write",
+        "File.append",
         "Fs.append", "Fs.delete", "Fs.exists", "Fs.list_dir", "Fs.read", "Fs.write",
         "Http.get", "Http.get_header", "Http.post", "Http.post_json",
-        "Http.response", "Http.serve", "Http.serve_routes",
+        "Http.get_with_headers", "Http.response", "Http.serve", "Http.serve_routes",
         "Json.get", "Json.index", "Json.keys", "Json.parse", "Json.stringify", "Json.validate",
         "List.all", "List.any", "List.contains", "List.filter", "List.filter_map",
         "List.find", "List.flat_map", "List.fold", "List.for_each", "List.get",
@@ -35,6 +36,7 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Map.contains_key", "Map.entries", "Map.get", "Map.insert", "Map.keys",
         "Map.length", "Map.new", "Map.remove", "Map.values",
         "Process.run", "Process.run_args",
+        "Process.env",
         "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
         "Regex.replace", "Regex.replace_all",
         "Str.char_at", "Str.contains", "Str.ends_with", "Str.index_of", "Str.join",
@@ -2203,6 +2205,35 @@ impl Interpreter {
                 propagated_none: false,
                 }),
             },
+            "File.append" => match (args.first(), args.get(1)) {
+                (Some(Value::String(path)), Some(Value::String(content))) => {
+                    use std::io::Write as IoWrite;
+                    let result = std::fs::OpenOptions::new()
+                        .append(true)
+                        .create(true)
+                        .open(path)
+                        .and_then(|mut f| f.write_all(content.as_bytes()));
+                    match result {
+                        Ok(()) => {
+                            self.log_effect("File.append", "IO", json!([path]), json!(null), 0)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::Unit],
+                            }))
+                        }
+                        Err(e) => Ok(Some(Value::Variant {
+                            name: "Err".into(),
+                            payload: vec![Value::String(e.to_string())],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "File.append expects (String, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
             "None" => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
             // Http stdlib
             "Http.get" => match args.first() {
@@ -2234,6 +2265,42 @@ impl Interpreter {
                     span: None,
                     propagated_err: None,
                 propagated_none: false,
+                }),
+            },
+            "Http.get_with_headers" => match (args.first(), args.get(1)) {
+                (Some(Value::String(url)), Some(Value::Map(headers))) => {
+                    let started = Instant::now();
+                    let mut req = ureq::get(url);
+                    for (k, v) in headers.iter() {
+                        if let Value::String(val) = v {
+                            req = req.set(k, val);
+                        }
+                    }
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match req.call() {
+                        Ok(resp) => {
+                            let body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.get_with_headers", "Http", json!([url]), json!(body), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Ok".into(),
+                                payload: vec![Value::String(body)],
+                            }))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            self.log_effect("Http.get_with_headers", "Http", json!([url]), json!(msg), duration_ms)?;
+                            Ok(Some(Value::Variant {
+                                name: "Err".into(),
+                                payload: vec![Value::String(msg)],
+                            }))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.get_with_headers expects (String, Map)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
                 }),
             },
             "Http.post" => match (args.first(), args.get(1)) {
@@ -2600,6 +2667,27 @@ impl Interpreter {
                 }
                 _ => Err(RuntimeError {
                     message: "Process.run_args expects (String, List)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            // Process.env
+            "Process.env" => match args.first() {
+                Some(Value::String(key)) => {
+                    match std::env::var(key) {
+                        Ok(val) => Ok(Some(Value::Variant {
+                            name: "Some".into(),
+                            payload: vec![Value::String(val)],
+                        })),
+                        Err(_) => Ok(Some(Value::Variant {
+                            name: "None".into(),
+                            payload: vec![],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Process.env expects (String)".into(),
                     span: None,
                     propagated_err: None,
                     propagated_none: false,

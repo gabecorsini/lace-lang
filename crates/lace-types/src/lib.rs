@@ -442,6 +442,14 @@ impl Checker {
             (vec![Type::String], Type::Dynamic),
         );
         self.fn_sigs.insert(
+            "File.append".into(),
+            (vec![Type::String, Type::String], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Http.get_with_headers".into(),
+            (vec![Type::String, Type::Dynamic], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
             "Http.post".into(),
             (vec![Type::String, Type::String], Type::Dynamic),
         );
@@ -474,6 +482,10 @@ impl Checker {
         self.fn_sigs.insert(
             "Process.run_args".into(),
             (vec![Type::String, Type::Dynamic], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Process.env".into(),
+            (vec![Type::String], Type::Dynamic),
         );
         // Json stdlib
         self.scopes[0].vars.insert("Json".into(), Type::Dynamic);
