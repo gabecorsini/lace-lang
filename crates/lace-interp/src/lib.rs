@@ -538,9 +538,13 @@ impl Interpreter {
             match item {
                 TopLevelItem::Function(f) => {
                     let qualified = format!("{}.{}", alias, f.name);
-                    // Functions are stored under "<canon_path>.<name>" by register_items
+                    // Functions are stored under "<module_decl_name>.<fn_name>" by register_items.
+                    // Try canon_path variant, then module-decl variant, then bare name.
                     let canon_key = format!("{}.{}", canon_str, f.name);
+                    let module_key = program.module.as_ref()
+                        .map(|m| format!("{}.{}", m.path.join("."), f.name));
                     let def = self.functions.get(&canon_key)
+                        .or_else(|| module_key.as_deref().and_then(|k| self.functions.get(k)))
                         .or_else(|| self.functions.get(&f.name))
                         .cloned();
                     if let Some(def) = def {
