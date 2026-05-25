@@ -473,6 +473,7 @@ li { margin-bottom: 0.25em; }
     align-items: flex-start;
     gap: 0;
     padding: 0.5rem 0;
+    z-index: 110;
   }
   .topnav__links.open { display: flex; }
 
@@ -490,7 +491,7 @@ li { margin-bottom: 0.25em; }
     position: fixed;
     top: 56px;
     left: 0;
-    z-index: 90;
+    z-index: 80;
     height: calc(100vh - 56px);
     width: 260px;
     border-right: 1px solid #30363d;

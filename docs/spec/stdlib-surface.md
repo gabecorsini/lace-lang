@@ -203,6 +203,10 @@ fn first<A>(list: List<A>) -> Option<A> [Pure]
 fn last<A>(list: List<A>) -> Option<A> [Pure]
 fn flatten<A>(list: List<List<A>>) -> List<A> [Pure]
 fn partition<A>(list: List<A>, pred: fn(A) -> Bool [Pure]) -> Tuple<List<A>, List<A>> [Pure]
+fn join(list: List<String>, sep: String) -> String [Pure]
+-- Joins a list of strings with a separator. Equivalent to Python's str.join().
+fn filter_map<A, B>(list: List<A>, f: fn(A) -> Option<B> [Pure]) -> List<B> [Pure]
+-- Maps each element; keeps only Some(x) results, unwrapping them. Drops None() results.
 ```
 
 ### 4.2 Result-Collecting Pipeline

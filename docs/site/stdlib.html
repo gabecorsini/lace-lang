@@ -9,15 +9,25 @@
 <body>
 
 <nav class="topnav">
-  <a class="nav-logo" href="index.html">Lace 🧵</a>
-  <div class="nav-links">
-    <a href="tutorial.html">Tutorial</a>
-    <a href="reference.html">Reference</a>
-    <a href="stdlib.html">Stdlib</a>
-    <a href="cli.html">CLI</a>
-    <a href="lsp.html">LSP</a>
-    <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub ↗</a>
-  </div>
+  <a class="topnav__logo" href="index.html">Lace 🧵</a>
+
+  <button class="topnav__hamburger" id="hamburger" aria-label="Toggle navigation" aria-expanded="false">
+    <span></span><span></span><span></span>
+  </button>
+
+  <ul class="topnav__links" id="nav-links">
+    <li><a href="tutorial.html">Tutorial</a></li>
+    <li><a href="reference.html">Reference</a></li>
+    <li><a href="stdlib.html" class="active">Stdlib</a></li>
+    <li><a href="cli.html">CLI</a></li>
+    <li><a href="lsp.html">LSP</a></li>
+    <li class="github-link">
+      <a href="https://github.com/gabecorsini/lace-lang" target="_blank" rel="noopener">
+        <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style="vertical-align:middle;margin-right:0.3em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </li>
+  </ul>
 </nav>
 
 <div class="page-layout">
@@ -36,6 +46,7 @@
       <li><a href="#json">Json</a></li>
       <li><a href="#env">Env</a></li>
       <li><a href="#file">File</a></li>
+      <li><a href="#regex">Regex</a></li>
     </ul>
   </aside>
 
@@ -290,6 +301,16 @@ match n {
             <td><code>List.is_empty</code></td>
             <td><code>is_empty(list: List&lt;T&gt;) -&gt; Bool</code></td>
             <td>Returns true if the list has no elements.</td>
+          </tr>
+          <tr>
+            <td><code>List.join</code></td>
+            <td><code>join(list: List, sep: String) -&gt; String</code></td>
+            <td>Joins a list of strings with a separator.</td>
+          </tr>
+          <tr>
+            <td><code>List.filter_map</code></td>
+            <td><code>filter_map(list: List, f: Fn) -&gt; List</code></td>
+            <td>Maps each element through <code>f</code>, keeps only <code>Some(x)</code> results, and unwraps them.</td>
           </tr>
         </tbody>
       </table>
@@ -789,6 +810,76 @@ match File.write("output.txt", "Hello from Lace!\n") {
       </div>
     </section>
 
+    <!-- ───────────────────────────── REGEX ───────────────────────────── -->
+    <section id="regex">
+      <h2>Regex</h2>
+      <p>Pattern matching and text extraction using regular expressions.</p>
+      <table class="api-table">
+        <thead>
+          <tr><th>Function</th><th>Signature</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Regex.new</code></td>
+            <td><code>new(pattern: String) -&gt; Result&lt;Regex, String&gt;</code></td>
+            <td>Compiles a regex pattern. Returns <code>Err</code> if the pattern is invalid.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.is_match</code></td>
+            <td><code>is_match(re: Regex, input: String) -&gt; Bool</code></td>
+            <td>Returns true if the input contains a match for the pattern.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.find</code></td>
+            <td><code>find(re: Regex, input: String) -&gt; Option&lt;String&gt;</code></td>
+            <td>Returns the first match as a string, or <code>None</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.find_all</code></td>
+            <td><code>find_all(re: Regex, input: String) -&gt; List&lt;String&gt;</code></td>
+            <td>Returns all non-overlapping matches as a list of strings.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.captures</code></td>
+            <td><code>captures(re: Regex, input: String) -&gt; Option&lt;List&lt;String&gt;&gt;</code></td>
+            <td>Returns capture groups from the first match, or <code>None</code> if no match.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.replace</code></td>
+            <td><code>replace(re: Regex, input: String, replacement: String) -&gt; String</code></td>
+            <td>Replaces the first match with the replacement string.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.replace_all</code></td>
+            <td><code>replace_all(re: Regex, input: String, replacement: String) -&gt; String</code></td>
+            <td>Replaces all matches with the replacement string.</td>
+          </tr>
+          <tr>
+            <td><code>Regex.split</code></td>
+            <td><code>split(re: Regex, input: String) -&gt; List&lt;String&gt;</code></td>
+            <td>Splits the input string on each match of the pattern.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="code-block">
+        <div class="code-label">Example</div>
+        <pre><code>let re = Result.unwrap(Regex.new("\\d+"))
+
+println(Regex.is_match(re, "price: 42"))   // true
+println(Regex.find(re, "price: 42"))        // Some("42")
+println(Regex.find_all(re, "a1 b22 c333")) // ["1", "22", "333"]
+
+let email_re = Result.unwrap(Regex.new("(\\w+)@(\\w+\\.\\w+)"))
+match Regex.captures(email_re, "user@example.com") {
+  Some(groups) => println(groups)   // ["user", "example.com"]
+  None         => println("no match")
+}
+
+let cleaned = Regex.replace_all(re, "foo123bar456", "NUM")
+println(cleaned) // "fooNUMbarNUM"</code></pre>
+      </div>
+    </section>
+
   </main>
 </div>
 
@@ -796,5 +887,34 @@ match File.write("output.txt", "Hello from Lace!\n") {
   <p>Lace language &mdash; <a href="https://github.com/gabecorsini/lace-lang" target="_blank">GitHub</a></p>
 </footer>
 
+<script>
+  (function () {
+    const hamburger = document.getElementById('hamburger');
+    const navLinks  = document.getElementById('nav-links');
+
+    hamburger.addEventListener('click', function () {
+      const open = navLinks.classList.toggle('open');
+      hamburger.classList.toggle('open', open);
+      hamburger.setAttribute('aria-expanded', String(open));
+    });
+
+    navLinks.querySelectorAll('a').forEach(function (link) {
+      link.addEventListener('click', function () {
+        navLinks.classList.remove('open');
+        hamburger.classList.remove('open');
+        hamburger.setAttribute('aria-expanded', 'false');
+      });
+    });
+
+    document.querySelectorAll('h1[id], h2[id], h3[id], h4[id]').forEach(function (heading) {
+      const anchor = document.createElement('a');
+      anchor.className = 'heading-anchor';
+      anchor.href = '#' + heading.id;
+      anchor.textContent = '#';
+      anchor.setAttribute('aria-hidden', 'true');
+      heading.appendChild(anchor);
+    });
+  })();
+</script>
 </body>
 </html>

@@ -25,7 +25,7 @@ The core idea: **`tool` and `fn` are different things.** A `fn` is pure computat
 - `tool` declarations — distinct from `fn`, effect-enforced, auto-logged to structured JSON
 - `@retry(max: N)` and `@timeout(ms: N)` decorators on any tool
 - Static type checker with multi-error reporting, error codes (E001–E005), and "did you mean?" suggestions
-- Full stdlib: `List`, `String`, `Map`, `Math`, `Http`, `Json`, `Env`
+- Full stdlib: `List`, `String`, `Map`, `Math`, `Http`, `Json`, `Env`, `Regex`, `Time`, `File`, `Process`, `Async`
 - Pipeline syntax (`|>`) for readable data transforms
 - `Option<T>` and `Result<T, E>` with `?` propagation — no nulls, no exceptions
 - Records, closures, pattern matching, `break`/`continue`/`return`
@@ -171,9 +171,11 @@ Flags: `--no-warn` suppresses warnings. `--no-tool-log` suppresses runtime tool 
 - [x] Type checker — multi-error, error codes, did-you-mean suggestions
 - [x] Tree-walking interpreter
 - [x] Records, closures, match, break/continue/return
-- [x] Full stdlib (List, String, Map, Math, Http, Json, Env)
+- [x] Full stdlib (List, String, Map, Math, Http, Json, Env, Regex, Time, File, Process, Async)
+- [x] List HOFs: map, filter, fold, reduce, sort_by, find, any, all, for_each, join, filter_map
 - [x] `@retry` / `@timeout` decorators
 - [x] `?` error propagation
+- [x] Async: spawn, await, all, race
 - [x] Multi-file modules + `lace.toml`
 - [x] `lace fmt`, `lace doc`, `lace explain`
 - [x] LSP server (hover, completion, diagnostics, go-to-def, formatting)
