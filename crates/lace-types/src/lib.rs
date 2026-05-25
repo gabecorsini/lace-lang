@@ -453,6 +453,18 @@ impl Checker {
             "Http.serve".into(),
             (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic),
         );
+        self.fn_sigs.insert(
+            "Http.serve_routes".into(),
+            (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Http.response".into(),
+            (vec![Type::Dynamic, Type::Dynamic, Type::Dynamic], Type::Dynamic),
+        );
+        self.fn_sigs.insert(
+            "Http.get_header".into(),
+            (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic),
+        );
         // Process stdlib
         self.scopes[0].vars.insert("Process".into(), Type::Dynamic);
         self.fn_sigs.insert(

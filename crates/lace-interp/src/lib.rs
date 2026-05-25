@@ -2280,6 +2280,158 @@ impl Interpreter {
                 }
                 Ok(Some(Value::Unit))
             }
+            // Http.serve_routes
+            "Http.serve_routes" => {
+                use std::io::{BufRead, BufReader, Write};
+                use std::net::TcpListener;
+                let port = match args.first() {
+                    Some(Value::Int(p)) => *p,
+                    _ => return Err(RuntimeError {
+                        message: "Http.serve_routes expects (Int, Map)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let routes_map = match args.get(1) {
+                    Some(Value::Map(m)) => m.clone(),
+                    _ => return Err(RuntimeError {
+                        message: "Http.serve_routes expects (Int, Map)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                };
+                let addr = format!("0.0.0.0:{}", port);
+                let listener = TcpListener::bind(&addr).map_err(|e| RuntimeError {
+                    message: format!("Http.serve_routes: failed to bind {}: {}", addr, e),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                })?;
+                for stream in listener.incoming() {
+                    match stream {
+                        Ok(mut s) => {
+                            let reader = BufReader::new(s.try_clone().unwrap());
+                            let mut lines = reader.lines();
+                            let first_line = lines.next()
+                                .and_then(|l| l.ok())
+                                .unwrap_or_default();
+                            let parts: Vec<&str> = first_line.split_whitespace().collect();
+                            let method = parts.first().copied().unwrap_or("GET").to_string();
+                            let path = parts.get(1).copied().unwrap_or("/").to_string();
+                            let mut header_lines = Vec::new();
+                            for line in lines.by_ref() {
+                                let l = line.unwrap_or_default();
+                                if l.is_empty() { break; }
+                                header_lines.push(l);
+                            }
+                            let headers_str = header_lines.join("\r\n");
+                            let mut req_map: HashMap<String, Value> = HashMap::new();
+                            req_map.insert("method".into(), Value::String(method.clone()));
+                            req_map.insert("path".into(), Value::String(path.clone()));
+                            req_map.insert("headers".into(), Value::String(headers_str));
+                            req_map.insert("body".into(), Value::String(String::new()));
+                            let route_key = format!("{} {}", method, path);
+                            let handler_opt = routes_map.get(&route_key).cloned();
+                            let (status_code, content_type, body) = if let Some(handler) = handler_opt {
+                                let resp_val = self.call_callable(
+                                    handler,
+                                    vec![Value::Map(req_map)],
+                                    Span::default(),
+                                )?;
+                                match resp_val {
+                                    Value::Map(resp_map) => {
+                                        let status = match resp_map.get("status") {
+                                            Some(Value::Int(n)) => *n as u16,
+                                            _ => 200,
+                                        };
+                                        let ct = match resp_map.get("content_type") {
+                                            Some(Value::String(s)) => s.clone(),
+                                            _ => "text/plain".into(),
+                                        };
+                                        let b = match resp_map.get("body") {
+                                            Some(Value::String(s)) => s.clone(),
+                                            _ => String::new(),
+                                        };
+                                        (status, ct, b)
+                                    }
+                                    Value::String(b) => (200u16, "text/plain".into(), b),
+                                    _ => (200u16, "text/plain".into(), String::new()),
+                                }
+                            } else {
+                                (404u16, "text/plain".into(), "404 Not Found".into())
+                            };
+                            let status_text = match status_code {
+                                200 => "OK", 201 => "Created", 204 => "No Content",
+                                400 => "Bad Request", 401 => "Unauthorized",
+                                403 => "Forbidden", 404 => "Not Found",
+                                500 => "Internal Server Error", _ => "OK",
+                            };
+                            let http_response = format!(
+                                "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
+                                status_code, status_text, content_type, body.len(), body
+                            );
+                            let _ = s.write_all(http_response.as_bytes());
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Ok(Some(Value::Unit))
+            }
+            // Http.response
+            "Http.response" => {
+                match (args.first(), args.get(1), args.get(2)) {
+                    (Some(Value::Int(status)), Some(Value::String(ct)), Some(Value::String(body))) => {
+                        let mut m: HashMap<String, Value> = HashMap::new();
+                        m.insert("status".into(), Value::Int(*status));
+                        m.insert("content_type".into(), Value::String(ct.clone()));
+                        m.insert("body".into(), Value::String(body.clone()));
+                        Ok(Some(Value::Map(m)))
+                    }
+                    _ => Err(RuntimeError {
+                        message: "Http.response expects (Int, String, String)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                }
+            }
+            // Http.get_header
+            "Http.get_header" => {
+                match (args.first(), args.get(1)) {
+                    (Some(Value::Map(req_map)), Some(Value::String(header_name))) => {
+                        let headers_str = match req_map.get("headers") {
+                            Some(Value::String(s)) => s.clone(),
+                            _ => String::new(),
+                        };
+                        let needle = format!("{}:", header_name.to_lowercase());
+                        let found = headers_str.lines().find_map(|line| {
+                            if line.to_lowercase().starts_with(&needle) {
+                                Some(line[header_name.len() + 1..].trim().to_string())
+                            } else {
+                                None
+                            }
+                        });
+                        match found {
+                            Some(val) => Ok(Some(Value::Variant {
+                                name: "Some".into(),
+                                payload: vec![Value::String(val)],
+                            })),
+                            None => Ok(Some(Value::Variant {
+                                name: "None".into(),
+                                payload: vec![],
+                            })),
+                        }
+                    }
+                    _ => Err(RuntimeError {
+                        message: "Http.get_header expects (Map, String)".into(),
+                        span: None,
+                        propagated_err: None,
+                        propagated_none: false,
+                    }),
+                }
+            }
             // Process.run
             "Process.run" => match args.first() {
                 Some(Value::String(cmd)) => {

@@ -1,0 +1,24 @@
+# Phase 35 QA: Http.response and Http.get_header
+
+# Test Http.response constructor
+let resp = Http.response(200, "text/plain", "hello")
+assert_eq(Map.get(resp, "status"), Some(200))
+assert_eq(Map.get(resp, "body"), Some("hello"))
+assert_eq(Map.get(resp, "content_type"), Some("text/plain"))
+
+# Test Http.response with different status
+let resp2 = Http.response(404, "text/html", "Not Found")
+assert_eq(Map.get(resp2, "status"), Some(404))
+assert_eq(Map.get(resp2, "body"), Some("Not Found"))
+
+# Test Http.get_header with a mock request map
+let req = Map.new()
+let req = Map.insert(req, "headers", "Content-Type: application/json\r\nAuthorization: Bearer abc")
+let h = Http.get_header(req, "Content-Type")
+assert_eq(h, Some("application/json"))
+
+# Test Http.get_header for missing header
+let h2 = Http.get_header(req, "X-Missing")
+assert_eq(h2, None())
+
+print("Phase 35 QA passed!")
