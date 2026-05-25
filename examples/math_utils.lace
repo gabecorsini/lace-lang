@@ -1,0 +1,9 @@
+fn add(a: Int, b: Int) -> Int [Pure] {
+    a + b
+}
+
+fn multiply(a: Int, b: Int) -> Int [Pure] {
+    a * b
+}
+
+const pi: Float = 3.14159

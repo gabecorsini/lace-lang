@@ -29,7 +29,10 @@ pub struct UseDecl {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportDecl {
-    pub path: Vec<String>,
+    /// Relative file path, e.g. "./utils.lace"
+    pub file_path: String,
+    /// Alias identifier, e.g. `utils` in `import "./utils.lace" as utils`
+    pub alias: String,
     pub span: Span,
 }
 

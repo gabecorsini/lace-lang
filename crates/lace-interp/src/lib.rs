@@ -188,6 +188,8 @@ pub struct Interpreter {
     tools: HashMap<String, ToolDef>,
     module_members: HashMap<String, HashSet<String>>,
     loaded_modules: HashSet<String>,
+    /// Stack of canonical file paths currently being loaded — used for circular import detection.
+    loading_stack: Vec<PathBuf>,
     call_stack: Vec<CallFrame>,
     loop_signal: Option<LoopSignal>,
     return_value: Option<Value>,
@@ -246,6 +248,7 @@ impl Interpreter {
             tools: HashMap::new(),
             module_members: HashMap::new(),
             loaded_modules: HashSet::new(),
+            loading_stack: Vec::new(),
             call_stack: Vec::new(),
             loop_signal: None,
             return_value: None,
@@ -404,11 +407,6 @@ impl Interpreter {
 
         for import in &program.imports {
             self.load_module_from_import(&base_dir, import)?;
-            // Bind the last path segment as a module-ref value so Lace code can do module.fn(...)
-            if let Some(name) = import.path.last() {
-                let module_name = import.path.join(".");
-                self.env.define(name.clone(), Value::String(module_name));
-            }
         }
 
         Ok(())
@@ -419,22 +417,50 @@ impl Interpreter {
         base_dir: &Path,
         import: &ImportDecl,
     ) -> Result<(), RuntimeError> {
-        let module_name = import.path.join(".");
-        if self.loaded_modules.contains(&module_name) {
+        // Resolve the file path relative to the importing file's directory.
+        let module_path = base_dir.join(&import.file_path);
+        let canonical = module_path.canonicalize().map_err(|e| RuntimeError {
+            message: format!(
+                "import '{}': file not found at '{}': {e}",
+                import.file_path,
+                module_path.display()
+            ),
+            span: Some(import.span),
+            propagated_err: None,
+        })?;
+
+        // Dedup: skip if already loaded.
+        let canon_str = canonical.to_string_lossy().to_string();
+        if self.loaded_modules.contains(&canon_str) {
+            // Module already loaded — just bind the alias as itself for dispatch.
+            self.env
+                .define(import.alias.clone(), Value::String(import.alias.clone()));
             return Ok(());
         }
 
-        let mut module_path = base_dir.to_path_buf();
-        for part in &import.path {
-            module_path.push(part);
+        // Circular import detection.
+        if self.loading_stack.contains(&canonical) {
+            let cycle: Vec<String> = self
+                .loading_stack
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+            return Err(RuntimeError {
+                message: format!(
+                    "circular import detected: {} -> {}",
+                    cycle.join(" -> "),
+                    canonical.display()
+                ),
+                span: Some(import.span),
+                propagated_err: None,
+            });
         }
-        module_path.set_extension("lace");
 
-        let source = fs::read_to_string(&module_path).map_err(|e| RuntimeError {
+        let source = fs::read_to_string(&canonical).map_err(|e| RuntimeError {
             message: format!(
-                "failed to import module '{}' from '{}': {e}",
-                module_name,
-                module_path.display()
+                "import '{}': cannot read file '{}': {e}",
+                import.file_path,
+                canonical.display()
             ),
             span: Some(import.span),
             propagated_err: None,
@@ -449,8 +475,9 @@ impl Interpreter {
                 .join("; ");
             return Err(RuntimeError {
                 message: format!(
-                    "failed to parse imported module '{}': {}",
-                    module_name, joined
+                    "parse error in imported file '{}': {}",
+                    canonical.display(),
+                    joined
                 ),
                 span: Some(import.span),
                 propagated_err: None,
@@ -458,26 +485,100 @@ impl Interpreter {
         }
 
         let program = parsed.ok_or_else(|| RuntimeError {
-            message: format!("failed to parse imported module '{}'", module_name),
+            message: format!(
+                "failed to parse imported file '{}'",
+                canonical.display()
+            ),
             span: Some(import.span),
             propagated_err: None,
         })?;
 
-        if self.loaded_modules.contains(&module_name) {
-            return Ok(());
-        }
-        self.loaded_modules.insert(module_name.clone());
+        self.loaded_modules.insert(canon_str.clone());
+        self.loading_stack.push(canonical.clone());
 
+        // Save interpreter context and switch into the imported module's scope.
         let prev_module = self.module_name.clone();
         let prev_dir = self.current_dir.clone();
-        self.module_name = module_name;
-        self.current_dir = module_path.parent().map(Path::to_path_buf);
+        self.module_name = canon_str.clone();
+        self.current_dir = canonical.parent().map(Path::to_path_buf);
 
+        // Recursively load the imported module's own imports.
         self.load_imports(&program)?;
+
+        // Register items under the module's own names (for recursive calls inside the module),
+        // then register again prefixed with the alias for callers.
         self.register_items(&program);
 
+        // Also register every public fn/tool/enum/record under "<alias>.<name>"
+        // so callers can do alias.fn_name(...).
+        let alias = import.alias.clone();
+        for item in &program.items {
+            match item {
+                TopLevelItem::Function(f) => {
+                    let qualified = format!("{}.{}", alias, f.name);
+                    // Functions are stored under "<canon_path>.<name>" by register_items
+                    let canon_key = format!("{}.{}", canon_str, f.name);
+                    let def = self.functions.get(&canon_key)
+                        .or_else(|| self.functions.get(&f.name))
+                        .cloned();
+                    if let Some(def) = def {
+                        self.functions.insert(qualified, def);
+                    }
+                }
+                TopLevelItem::Tool(t) => {
+                    let qualified = format!("{}.{}", alias, t.name);
+                    let def = self.tools.get(&t.name).cloned();
+                    if let Some(def) = def {
+                        self.tools.insert(qualified, def);
+                    }
+                }
+                TopLevelItem::Enum(e) => {
+                    // Register variant constructors under alias.VariantName as well
+                    for variant in &e.variants {
+                        let qualified_variant = format!("{}.{}", alias, variant.name);
+                        self.variant_constructors.insert(qualified_variant.clone());
+                        if let Some(v) = self.env.get(&variant.name) {
+                            self.env.define(qualified_variant, v);
+                        }
+                    }
+                    // Also expose the enum type name under alias.EnumName
+                    let qualified_enum = format!("{}.{}", alias, e.name);
+                    self.env
+                        .define(qualified_enum, Value::String(format!("{}.{}", alias, e.name)));
+                }
+                TopLevelItem::Record(r) => {
+                    // Expose record constructor alias.RecordName
+                    let qualified = format!("{}.{}", alias, r.name);
+                    if let Some(v) = self.env.get(&r.name) {
+                        self.env.define(qualified, v);
+                    }
+                }
+                TopLevelItem::Const(c) => {
+                    let qualified = format!("{}.{}", alias, c.name);
+                    // First try env (in case already evaluated), then eval inline
+                    let v = if let Some(v) = self.env.get(&c.name) {
+                        Some(v)
+                    } else {
+                        self.eval_expr(&c.expr).ok()
+                    };
+                    if let Some(v) = v {
+                        self.env.define(qualified, v);
+                    }
+                }
+                TopLevelItem::TypeAlias(_)
+                | TopLevelItem::Extern(_)
+                | TopLevelItem::Statement(_) => {}
+            }
+        }
+
+        self.loading_stack.pop();
         self.current_dir = prev_dir;
         self.module_name = prev_module;
+
+        // Bind the alias as a string so method dispatch constructs "alias.method_name"
+        // and finds the qualified function registered above.
+        self.env
+            .define(import.alias.clone(), Value::String(import.alias.clone()));
 
         Ok(())
     }
@@ -705,6 +806,13 @@ impl Interpreter {
                     .iter()
                     .map(|a| self.eval_expr(a))
                     .collect::<Result<Vec<_>, _>>()?;
+                // If target is a module ref (String), resolve as a qualified function call
+                if let Value::String(module_name) = &target {
+                    let fn_name = format!("{}.{}", module_name, call.method);
+                    if self.functions.contains_key(&fn_name) {
+                        return self.call_function(&fn_name.clone(), args, call.span);
+                    }
+                }
                 self.call_method(target, &call.method, args, call.span)
             }
             Expr::FieldAccess {
@@ -714,27 +822,33 @@ impl Interpreter {
             } => {
                 let obj = self.eval_expr(target)?;
                 match obj {
+                    // Module ref: resolve const as qualified env lookup (e.g. math.pi)
+                    // or return a function ref for method calls (e.g. math.add)
+                    Value::String(ref module_name) => {
+                        let qualified = format!("{}.{}", module_name, field);
+                        // Check env first (covers consts)
+                        if let Some(v) = self.env.get(&qualified) {
+                            return Ok(v);
+                        }
+                        // Then check functions
+                        if self.functions.contains_key(&qualified) {
+                            return Ok(Value::String(qualified));
+                        }
+                        Err(RuntimeError {
+                            message: format!(
+                                "module '{}' has no exported symbol '{}'",
+                                module_name, field
+                            ),
+                            span: Some(*span),
+                            propagated_err: None,
+                        })
+                    }
                     Value::Record { fields, .. } => {
                         fields.get(field).cloned().ok_or_else(|| RuntimeError {
                             message: format!("missing field '{}'", field),
                             span: Some(*span),
                             propagated_err: None,
                         })
-                    }
-                    Value::String(module_name) => {
-                        let fn_name = format!("{}.{}", module_name, field);
-                        if self.functions.contains_key(&fn_name) {
-                            Ok(Value::String(fn_name))
-                        } else {
-                            Err(RuntimeError {
-                                message: format!(
-                                    "module '{}' has no exported function '{}'",
-                                    module_name, field
-                                ),
-                                span: Some(*span),
-                                propagated_err: None,
-                            })
-                        }
                     }
                     _ => Err(RuntimeError {
                         message: "field access on non-record value".into(),

@@ -262,6 +262,7 @@ impl<'a> Lexer<'a> {
             "module" => TokenKind::Module,
             "use" => TokenKind::Use,
             "import" => TokenKind::Import,
+            "as" => TokenKind::As,
             "fn" => TokenKind::Fn,
             "tool" => TokenKind::Tool,
             "record" => TokenKind::Record,

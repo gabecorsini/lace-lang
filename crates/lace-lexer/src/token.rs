@@ -31,6 +31,7 @@ pub enum TokenKind {
     Module,
     Use,
     Import,
+    As,
     Fn,
     Tool,
     Record,

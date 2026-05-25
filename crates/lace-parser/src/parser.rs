@@ -157,10 +157,16 @@ impl Parser {
 
     fn parse_import_decl(&mut self) -> Option<ImportDecl> {
         let start = self.expect(TokenKind::Import)?.span.start;
-        let path = self.parse_module_path()?;
+        // Expect a string literal for the file path, e.g. "./utils.lace"
+        let file_path = self.expect_string()?;
+        // Expect `as`
+        self.expect(TokenKind::As)?;
+        // Expect an identifier for the alias
+        let alias = self.expect_ident()?;
         let end = self.prev_span().end;
         Some(ImportDecl {
-            path,
+            file_path,
+            alias,
             span: Span { start, end },
         })
     }
@@ -1841,6 +1847,7 @@ impl Parser {
                 | (Const, Const)
                 | (Extern, Extern)
                 | (From, From)
+                | (As, As)
                 | (Let, Let)
                 | (Mut, Mut)
                 | (For, For)

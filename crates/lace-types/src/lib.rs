@@ -169,9 +169,7 @@ pub fn check_program_full(program: &Program) -> (Vec<TypeError>, Vec<TypeWarning
     let mut checker = Checker::new();
     // Register imported module names as Dynamic so field access type-checks pass
     for import in &program.imports {
-        if let Some(name) = import.path.last() {
-            checker.scopes[0].vars.insert(name.clone(), Type::Dynamic);
-        }
+        checker.scopes[0].vars.insert(import.alias.clone(), Type::Dynamic);
     }
     checker.collect_signatures(program);
     checker.check(program);
