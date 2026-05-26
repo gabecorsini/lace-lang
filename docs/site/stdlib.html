@@ -185,16 +185,36 @@ assert_eq(x, 42)</code></pre>
             <td><code>parse_int(s: String) -&gt; Result&lt;Int, String&gt;</code></td>
             <td>Parses the string as an integer. Returns <code>Err</code> on failure.</td>
           </tr>
+         <tr>
+           <td><code>String.parse_float</code></td>
+           <td><code>parse_float(s: String) -&gt; Result&lt;Float, String&gt;</code></td>
+           <td>Parses the string as a float. Returns <code>Err</code> on failure.</td>
+         </tr>
           <tr>
-            <td><code>String.parse_float</code></td>
-            <td><code>parse_float(s: String) -&gt; Result&lt;Float, String&gt;</code></td>
-            <td>Parses the string as a float. Returns <code>Err</code> on failure.</td>
+            <td><code>String.format</code></td>
+            <td><code>format(template: String, args: List&lt;Any&gt;) -&gt; String</code></td>
+            <td>Replaces each <code>{}</code> placeholder in <code>template</code> with the corresponding element of <code>args</code>.</td>
           </tr>
-        </tbody>
-      </table>
-      <div class="code-block">
-        <div class="code-label">Example</div>
-        <pre><code>let s = "  Hello, World!  "
+          <tr>
+            <td><code>String.lines</code></td>
+            <td><code>lines(s: String) -&gt; List&lt;String&gt;</code></td>
+            <td>Splits the string on newlines and returns each line as a list element.</td>
+          </tr>
+          <tr>
+            <td><code>String.is_empty</code></td>
+            <td><code>is_empty(s: String) -&gt; Bool</code></td>
+            <td>Returns true if the string has zero characters.</td>
+          </tr>
+          <tr>
+            <td><code>String.count</code></td>
+            <td><code>count(s: String, sub: String) -&gt; Int</code></td>
+            <td>Returns the number of non-overlapping occurrences of <code>sub</code> in <code>s</code>.</td>
+          </tr>
+       </tbody>
+     </table>
+     <div class="code-block">
+       <div class="code-label">Example</div>
+       <pre><code>let s = "  Hello, World!  "
 println(String.trim(s))                   // "Hello, World!"
 println(String.to_upper("hello"))         // "HELLO"
 println(String.split("a,b,c", ","))       // ["a", "b", "c"]
@@ -307,16 +327,51 @@ match n {
             <td><code>join(list: List, sep: String) -&gt; String</code></td>
             <td>Joins a list of strings with a separator.</td>
           </tr>
+         <tr>
+           <td><code>List.filter_map</code></td>
+           <td><code>filter_map(list: List, f: Fn) -&gt; List</code></td>
+           <td>Maps each element through <code>f</code>, keeps only <code>Some(x)</code> results, and unwraps them.</td>
+         </tr>
           <tr>
-            <td><code>List.filter_map</code></td>
-            <td><code>filter_map(list: List, f: Fn) -&gt; List</code></td>
-            <td>Maps each element through <code>f</code>, keeps only <code>Some(x)</code> results, and unwraps them.</td>
+            <td><code>List.enumerate</code></td>
+            <td><code>enumerate(list: List&lt;T&gt;) -&gt; List&lt;(Int, T)&gt;</code></td>
+            <td>Returns a list of <code>(index, element)</code> pairs, starting at index 0.</td>
           </tr>
-        </tbody>
-      </table>
-      <div class="code-block">
-        <div class="code-label">Example</div>
-        <pre><code>let nums = [1, 2, 3, 4, 5]
+          <tr>
+            <td><code>List.chunk</code></td>
+            <td><code>chunk(list: List&lt;T&gt;, size: Int) -&gt; List&lt;List&lt;T&gt;&gt;</code></td>
+            <td>Splits the list into consecutive sub-lists of at most <code>size</code> elements.</td>
+          </tr>
+          <tr>
+            <td><code>List.take</code></td>
+            <td><code>take(list: List&lt;T&gt;, n: Int) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns the first <code>n</code> elements of the list.</td>
+          </tr>
+          <tr>
+            <td><code>List.drop</code></td>
+            <td><code>drop(list: List&lt;T&gt;, n: Int) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns the list with the first <code>n</code> elements removed.</td>
+          </tr>
+          <tr>
+            <td><code>List.last</code></td>
+            <td><code>last(list: List&lt;T&gt;) -&gt; Option&lt;T&gt;</code></td>
+            <td>Returns <code>Some(last_element)</code>, or <code>None</code> if the list is empty.</td>
+          </tr>
+          <tr>
+            <td><code>List.uniq</code></td>
+            <td><code>uniq(list: List&lt;T&gt;) -&gt; List&lt;T&gt;</code></td>
+            <td>Returns a new list with duplicate elements removed, preserving first-occurrence order.</td>
+          </tr>
+          <tr>
+            <td><code>List.count</code></td>
+            <td><code>count(list: List&lt;T&gt;, v: T) -&gt; Int</code></td>
+            <td>Returns the number of times <code>v</code> appears in the list.</td>
+          </tr>
+       </tbody>
+     </table>
+     <div class="code-block">
+       <div class="code-label">Example</div>
+       <pre><code>let nums = [1, 2, 3, 4, 5]
 
 let doubled = List.map(nums, fn(x) => x * 2)     // [2, 4, 6, 8, 10]
 let evens   = List.filter(nums, fn(x) => x % 2 == 0) // [2, 4]
@@ -372,16 +427,31 @@ let pairs = List.zip([1, 2, 3], ["a", "b", "c"])  // [(1,"a"), (2,"b"), (3,"c")]
             <td><code>contains_key(map: Map, key: String) -&gt; Bool</code></td>
             <td>Returns true if the map contains the given key.</td>
           </tr>
+         <tr>
+           <td><code>Map.len</code></td>
+           <td><code>len(map: Map) -&gt; Int</code></td>
+           <td>Returns the number of key-value pairs in the map.</td>
+         </tr>
           <tr>
-            <td><code>Map.len</code></td>
-            <td><code>len(map: Map) -&gt; Int</code></td>
-            <td>Returns the number of key-value pairs in the map.</td>
+            <td><code>Map.merge</code></td>
+            <td><code>merge(base: Map, other: Map) -&gt; Map</code></td>
+            <td>Returns a new map combining both maps; keys from <code>other</code> overwrite those in <code>base</code>.</td>
           </tr>
-        </tbody>
-      </table>
-      <div class="code-block">
-        <div class="code-label">Example</div>
-        <pre><code>let m = { "name": "Alice", "age": "30" }
+          <tr>
+            <td><code>Map.size</code></td>
+            <td><code>size(map: Map) -&gt; Int</code></td>
+            <td>Alias for <code>Map.len</code> — returns the number of key-value pairs.</td>
+          </tr>
+          <tr>
+            <td><code>Map.map_values</code></td>
+            <td><code>map_values(map: Map, f: fn(Any) -&gt; Any) -&gt; Map</code></td>
+            <td>Applies <code>f</code> to every value in the map and returns a new map with the transformed values.</td>
+          </tr>
+       </tbody>
+     </table>
+     <div class="code-block">
+       <div class="code-label">Example</div>
+       <pre><code>let m = { "name": "Alice", "age": "30" }
 
 println(Map.get(m, "name"))          // Some("Alice")
 println(Map.contains_key(m, "city")) // false

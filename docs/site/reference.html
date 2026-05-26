@@ -41,6 +41,8 @@
       <li><a href="#records">Records &amp; Enums</a></li>
       <li><a href="#modules">Modules</a></li>
       <li><a href="#grammar">Grammar</a></li>
+      <li><a href="#tooling">Tooling &amp; CLI</a></li>
+      <li><a href="#editors">Editor Support</a></li>
     </ul>
   </aside>
 
@@ -136,7 +138,8 @@ y = y + <span class="num">1</span>          <span class="cmt"># reassign mutable
 <span class="kw">fn</span> apply(f: <span class="kw">fn</span>(Int) -&gt; Int, x: Int) -&gt; Int {
   f(x)
 }</code></pre>
-    <p><code>fn</code> declares a <strong>pure</strong> function — no I/O, no side effects. The type checker warns (W004) if a <code>fn</code> calls effectful operations. If you need I/O, use <code>tool</code>.</p>
+    <p><code>fn</code> declares a <strong>pure</strong> function — no I/O, no side effects. If you need I/O, use <code>tool</code>.</p>
+    <p><strong>Effect enforcement is a hard error.</strong> As of Lace 0.3, calling an effectful function (Http, File, Process, or a <code>tool</code>) from inside a pure <code>fn</code> is a <strong>compile-time error (E006)</strong>, not just a warning. Declare the function as <code>tool</code> to permit effects.</p>
 
     <h2 id="tools">Tools &amp; Effects</h2>
     <pre><code><span class="dec">@retry</span>(max: <span class="num">3</span>)
@@ -149,7 +152,7 @@ y = y + <span class="num">1</span>          <span class="cmt"># reassign mutable
     <h3>tool vs fn</h3>
     <table>
       <tr><th></th><th><code>fn</code></th><th><code>tool</code></th></tr>
-      <tr><td>I/O allowed</td><td>No (W004 if you try)</td><td>Yes</td></tr>
+      <tr><td>I/O allowed</td><td>No (E006 error)</td><td>Yes</td></tr>
       <tr><td>Auto-logged</td><td>No</td><td>Yes (JSON to stderr)</td></tr>
       <tr><td><code>@retry</code></td><td>No</td><td>Yes</td></tr>
       <tr><td><code>@timeout</code></td><td>No</td><td>Yes</td></tr>
@@ -239,6 +242,31 @@ call        = expr "(" args ")" [ "?" ] ;
 literal     = INT | FLOAT | STRING | "true" | "false"
             | "[" [ expr { "," expr } ] "]"
             | "{" [ STRING ":" expr { "," STRING ":" expr } ] "}" ;</code></pre>
+
+    <h2 id="tooling">Tooling &amp; CLI</h2>
+    <p>The <code>lace</code> CLI provides several subcommands for working with Lace programs:</p>
+    <table>
+      <tr><th>Command</th><th>Description</th></tr>
+      <tr><td><code>lace run &lt;file&gt;</code></td><td>Parse, type-check, effect-check, and execute a <code>.lace</code> file.</td></tr>
+      <tr><td><code>lace check &lt;file&gt;</code></td><td>Validate without executing. Exits non-zero on errors.</td></tr>
+      <tr><td><code>lace fmt &lt;file&gt;</code></td><td>Auto-format a <code>.lace</code> file in-place. Use <code>--check</code> for CI.</td></tr>
+      <tr><td><code>lace test &lt;path&gt;</code></td><td>Discover and run all <code>@test</code>-annotated functions in a file or directory.</td></tr>
+      <tr><td><code>lace watch &lt;file&gt;</code></td><td>Run a file and re-run it automatically on every save. Clears the terminal between runs.</td></tr>
+      <tr><td><code>lace build</code></td><td>Type-check the whole project defined in <code>lace.toml</code>.</td></tr>
+      <tr><td><code>lace doc [path]</code></td><td>Generate HTML documentation from <code>##</code> doc comments.</td></tr>
+      <tr><td><code>lace lsp</code></td><td>Start the Language Server (LSP) on stdio for editor integration.</td></tr>
+    </table>
+    <p>See the <a href="cli.html">CLI Reference</a> for full flag documentation.</p>
+
+    <h2 id="editors">Editor Support</h2>
+    <p>A VS Code extension for Lace is available at <code>editors/vscode/</code> in the repository. It provides:</p>
+    <ul>
+      <li>Syntax highlighting for <code>.lace</code> files</li>
+      <li>Inline error and warning diagnostics via the LSP</li>
+      <li>Go-to-definition and hover type information</li>
+      <li>Format-on-save using <code>lace fmt</code></li>
+    </ul>
+    <p>To install: open VS Code, run <code>Extensions: Install from VSIX…</code>, and select the <code>.vsix</code> file from <code>editors/vscode/</code>.</p>
   </main>
 </div>
 

@@ -82,11 +82,18 @@ enum Commands {
         #[arg(short = 'q', long = "quiet")]
         quiet: bool,
     },
-    /// Run @test functions from a .lace file or directory
+    /// Discover and run test functions from *_test.lace / *.test.lace files
+    ///
+    /// Test functions are regular fns prefixed with `test_` (or annotated with @test).
+    /// Without a PATH argument, discovers test files in the current directory.
     Test {
-        path: PathBuf,
+        /// A specific .lace test file or directory to search (default: current dir)
+        path: Option<PathBuf>,
         #[arg(long)]
         checkpoint: Option<PathBuf>,
+        /// Only run tests whose name contains this substring
+        #[arg(long)]
+        filter: Option<String>,
     },
     /// Replay a program from a previous checkpoint
     Replay {
@@ -240,11 +247,14 @@ fn run() -> Result<()> {
                 }
             }
         }
-        Commands::Test { path, checkpoint } => {
+        Commands::Test { path, checkpoint, filter } => {
             let started = Instant::now();
-            let files = collect_test_files(&path)?;
+            let search_path = path.unwrap_or_else(|| {
+                std::env::current_dir().expect("failed to get current directory")
+            });
+            let files = collect_test_files(&search_path)?;
             if files.is_empty() {
-                anyhow::bail!("no .lace files found at {}", path.display());
+                anyhow::bail!("no test files found at {}", search_path.display());
             }
 
             let mut all_tests: Vec<(PathBuf, String)> = Vec::new();
@@ -255,6 +265,11 @@ fn run() -> Result<()> {
 
                 let tests = collect_tests(&program);
                 for test in tests {
+                    if let Some(ref f) = filter {
+                        if !test.name.contains(f.as_str()) {
+                            continue;
+                        }
+                    }
                     all_tests.push((file.clone(), test.name.clone()));
                 }
             }
@@ -272,7 +287,7 @@ fn run() -> Result<()> {
                     checkpoint_path: checkpoint.clone().map(|p| p.display().to_string()),
                     replay_mode: false,
                     source_path: Some(file.display().to_string()),
-                    suppress_tool_log: false,
+                    suppress_tool_log: true,
                     log_file: None,
                 };
 
@@ -678,7 +693,14 @@ fn collect_test_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()
         if path.is_dir() {
             collect_test_files_recursive(&path, out)?;
         } else if path.extension().and_then(|s| s.to_str()) == Some("lace") {
-            out.push(path);
+            // Accept *_test.lace, *.test.lace, or any file passed directly
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            if stem.ends_with("_test") || stem.ends_with(".test") {
+                out.push(path);
+            }
         }
     }
 
@@ -691,7 +713,8 @@ fn collect_tests(program: &lace_ast::Program) -> Vec<lace_ast::FnDecl> {
         .iter()
         .filter_map(|item| match item {
             TopLevelItem::Function(f)
-                if f.annotations.iter().any(|a| a.name == "test") =>
+                if f.name.starts_with("test_")
+                    || f.annotations.iter().any(|a| a.name == "test") =>
             {
                 Some(f.clone())
             }

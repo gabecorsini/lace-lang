@@ -1,0 +1,11 @@
+fn test_addition() -> Unit [Pure] {
+    assert_eq(1 + 1, 2, "1 + 1 should equal 2")
+}
+
+fn test_multiplication() -> Unit [Pure] {
+    assert_eq(3 * 4, 12, "3 * 4 should equal 12")
+}
+
+fn test_string_concat() -> Unit [Pure] {
+    assert_eq("hello" ++ " world", "hello world", "string concat should work")
+}
