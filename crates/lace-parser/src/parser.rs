@@ -963,7 +963,7 @@ impl Parser {
                 self.bump();
                 // BUG-006: support both `let mut name` and bare `let name`
                 let _mutable = self.match_tok(&TokenKind::Mut);
-                let name = self.expect_ident()?;
+                let name = self.expect_ident_or_type_ident()?;
                 let ty = if self.match_tok(&TokenKind::Colon) {
                     Some(self.parse_type_expr()?)
                 } else {
@@ -985,7 +985,7 @@ impl Parser {
                 let start = self.curr_span().start;
                 self.bump();
                 self.expect(TokenKind::Let)?;
-                let name = self.expect_ident()?;
+                let name = self.expect_ident_or_type_ident()?;
                 let ty = if self.match_tok(&TokenKind::Colon) {
                     Some(self.parse_type_expr()?)
                 } else {
@@ -1622,7 +1622,7 @@ impl Parser {
             let pat = self.parse_pattern()?;
             self.expect(TokenKind::FatArrow)?;
             let arm_expr = self.parse_expr()?;
-            self.expect(TokenKind::Comma)?;
+            self.match_tok(&TokenKind::Comma);
             arms.push(MatchArm {
                 pattern: pat,
                 expr: arm_expr,
@@ -1936,9 +1936,22 @@ impl Parser {
         Some(parts)
     }
 
-    fn expect_ident(&mut self) -> Option<String> {
+   fn expect_ident(&mut self) -> Option<String> {
+       match self.peek_kind() {
+           TokenKind::Ident(s) => {
+               self.bump();
+               Some(s)
+           }
+           _ => {
+               self.error_here("expected identifier");
+               None
+           }
+       }
+   }
+
+    fn expect_ident_or_type_ident(&mut self) -> Option<String> {
         match self.peek_kind() {
-            TokenKind::Ident(s) => {
+            TokenKind::Ident(s) | TokenKind::TypeIdent(s) => {
                 self.bump();
                 Some(s)
             }

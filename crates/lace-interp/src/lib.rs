@@ -702,6 +702,13 @@ impl Interpreter {
         // Register all items under their bare names (so they work inside the module)
         self.register_items(&program);
 
+        // Execute top-level let statements so their values are available for aliasing
+        for item in &program.items {
+            if let TopLevelItem::Statement(stmt) = item {
+                let _ = self.eval_stmt(stmt);
+            }
+        }
+
         // Register only pub items under "<alias>.<name>"
         let alias = module_name.clone();
         for item in &program.items {
@@ -884,6 +891,13 @@ impl Interpreter {
         // Register items under the module's own names (for recursive calls inside the module),
         // then register again prefixed with the alias for callers.
         self.register_items(&program);
+
+        // Execute top-level let statements so their values are available for aliasing
+        for item in &program.items {
+            if let TopLevelItem::Statement(stmt) = item {
+                let _ = self.eval_stmt(stmt);
+            }
+        }
 
         // Also register every public fn/tool/enum/record under "<alias>.<name>"
         // so callers can do alias.fn_name(...).

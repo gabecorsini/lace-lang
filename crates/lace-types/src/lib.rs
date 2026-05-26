@@ -1211,7 +1211,28 @@ impl Checker {
                 self.define(name.clone(), scrutinee.clone());
             }
             Pattern::Tuple(parts, span) => {
-                if let Type::Tuple(elems) = scrutinee {
+                // Empty `[]` pattern matches against List types
+                if parts.is_empty() {
+                    if matches!(scrutinee, Type::List(_) | Type::Dynamic | Type::Unknown) {
+                        // ok
+                    } else if let Type::Tuple(elems) = scrutinee {
+                        if elems.is_empty() {
+                            // ok
+                        } else {
+                            self.errors.push(TypeError::InvalidPattern {
+                                message: "tuple pattern used on non-tuple value".into(),
+                                span_start: span.start,
+                                span_end: span.end,
+                            });
+                        }
+                    } else {
+                        self.errors.push(TypeError::InvalidPattern {
+                            message: "tuple pattern used on non-tuple value".into(),
+                            span_start: span.start,
+                            span_end: span.end,
+                        });
+                    }
+                } else if let Type::Tuple(elems) = scrutinee {
                     for (p, t) in parts.iter().zip(elems.iter()) {
                         self.bind_pattern(p, t);
                     }
