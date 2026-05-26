@@ -6,8 +6,10 @@ const vscode_1 = require("vscode");
 const node_1 = require("vscode-languageclient/node");
 let client;
 function activate(context) {
+    const config = vscode_1.workspace.getConfiguration("lace");
+    const lspPath = config.get("lspPath") ?? "lace";
     const serverOptions = {
-        command: "lace",
+        command: lspPath,
         args: ["lsp"],
         transport: node_1.TransportKind.stdio,
     };

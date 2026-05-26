@@ -1,5 +1,5 @@
 import * as path from "path";
-import { workspace, ExtensionContext, window } from "vscode";
+import { workspace, ExtensionContext } from "vscode";
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -10,8 +10,11 @@ import {
 let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
+  const config = workspace.getConfiguration("lace");
+  const lspPath: string = config.get("lspPath") ?? "lace";
+
   const serverOptions: ServerOptions = {
-    command: "lace",
+    command: lspPath,
     args: ["lsp"],
     transport: TransportKind.stdio,
   };

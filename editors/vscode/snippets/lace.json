@@ -1,0 +1,69 @@
+{
+  "Function with effect": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:param}: ${3:Type}) -> ${4:RetType} [${5:IO}] {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Function declaration with effect annotation"
+  },
+  "Pure function": {
+    "prefix": "fnpure",
+    "body": [
+      "fn ${1:name}(${2:param}: ${3:Type}) -> ${4:RetType} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Pure function declaration (no effects)"
+  },
+  "Match block": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\t${2:Pattern}(${3:x}) => $0,",
+      "\t_ => ${4:todo},",
+      "}"
+    ],
+    "description": "Match expression"
+  },
+  "Enum declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Name} {",
+      "\t${2:Variant1},",
+      "\t${3:Variant2}(${4:Type}),",
+      "}"
+    ],
+    "description": "Enum type declaration"
+  },
+  "Record declaration": {
+    "prefix": "record",
+    "body": [
+      "record ${1:Name} {",
+      "\t${2:field}: ${3:Type},",
+      "}"
+    ],
+    "description": "Record type declaration"
+  },
+  "If/else block": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition} {",
+      "\t$2",
+      "} else {",
+      "\t$0",
+      "}"
+    ],
+    "description": "If/else expression"
+  },
+  "For loop": {
+    "prefix": "forin",
+    "body": [
+      "for ${1:item} in ${2:iterable} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "For-in loop"
+  }
+}

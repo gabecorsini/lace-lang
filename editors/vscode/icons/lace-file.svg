@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Thread spool: circle body -->
+  <circle cx="8" cy="9" r="5" fill="#7aa2f7" opacity="0.9"/>
+  <!-- Spool ends (top/bottom bars) -->
+  <rect x="5" y="4.5" width="6" height="1.2" rx="0.6" fill="#5588d4"/>
+  <rect x="5" y="12.3" width="6" height="1.2" rx="0.6" fill="#5588d4"/>
+  <!-- Thread line going to needle -->
+  <line x1="8" y1="4.5" x2="13" y2="1" stroke="#c0caf5" stroke-width="0.8" stroke-linecap="round"/>
+  <!-- Needle body -->
+  <line x1="11.5" y1="2.5" x2="14.5" y2="0.5" stroke="#e0af68" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Needle eye -->
+  <circle cx="11.8" cy="2.3" r="0.6" fill="none" stroke="#1a1b26" stroke-width="0.5"/>
+</svg>

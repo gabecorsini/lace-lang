@@ -1,14 +1,15 @@
 {
   "name": "lace-lang",
   "displayName": "Lace Language",
-  "description": "Lace language support — syntax highlighting, diagnostics, hover",
-  "version": "0.1.0",
+  "description": "Lace language support — syntax highlighting, diagnostics, hover, snippets",
+  "version": "0.2.0",
   "publisher": "lace",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Snippets"
   ],
   "activationEvents": [
     "onLanguage:lace"
@@ -25,7 +26,11 @@
         "extensions": [
           ".lace"
         ],
-        "configuration": "./language-configuration.json"
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/lace-file.svg",
+          "dark": "./icons/lace-file.svg"
+        }
       }
     ],
     "grammars": [
@@ -34,7 +39,28 @@
         "scopeName": "source.lace",
         "path": "./syntaxes/lace.tmLanguage.json"
       }
-    ]
+    ],
+    "snippets": [
+      {
+        "language": "lace",
+        "path": "./snippets/lace.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lace",
+      "properties": {
+        "lace.lspPath": {
+          "type": "string",
+          "default": "lace",
+          "description": "Path to the lace binary used as the language server. Defaults to 'lace' (must be on PATH)."
+        },
+        "lace.enableDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable error and warning diagnostics from the Lace language server."
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",

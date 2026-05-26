@@ -33,8 +33,11 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "List.join", "List.length", "List.map", "List.max", "List.min", "List.range",
         "List.reduce", "List.sort", "List.sort_by", "List.sum", "List.zip",
         "List.append", "List.prepend", "List.reverse", "List.unique", "List.flatten",
+        "List.enumerate", "List.chunk", "List.take", "List.drop", "List.last",
+        "List.uniq", "List.count",
         "Map.contains_key", "Map.entries", "Map.get", "Map.insert", "Map.keys",
         "Map.length", "Map.new", "Map.remove", "Map.values",
+        "Map.merge", "Map.size", "Map.map_values",
         "Process.run", "Process.run_args",
         "Process.env",
         "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
@@ -42,6 +45,7 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Str.char_at", "Str.contains", "Str.ends_with", "Str.index_of", "Str.join",
         "Str.len", "Str.pad_left", "Str.pad_right", "Str.repeat", "Str.replace",
         "Str.slice", "Str.split", "Str.starts_with", "Str.to_lower", "Str.to_upper", "Str.trim",
+        "Str.format", "Str.lines", "Str.is_empty", "Str.count",
         // BUG-005: String.* as alias for Str.*
         "String.char_at", "String.contains", "String.ends_with", "String.index_of", "String.join",
         "String.len", "String.pad_left", "String.pad_right", "String.repeat", "String.replace",
@@ -2351,6 +2355,100 @@ impl Interpreter {
                     })
                 }
             }
+            "List.enumerate" => match args.first() {
+                Some(Value::List(items)) => {
+                    let out = items.iter().enumerate()
+                        .map(|(i, v)| Value::Tuple(vec![Value::Int(i as i64), v.clone()]))
+                        .collect();
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError { message: "List.enumerate expects (List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.flatten" => match args.first() {
+                Some(Value::List(items)) => {
+                    let mut out = Vec::new();
+                    for item in items {
+                        if let Value::List(inner) = item {
+                            out.extend(inner.clone());
+                        } else {
+                            out.push(item.clone());
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError { message: "List.flatten expects (List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.chunk" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(size))) => {
+                    let n = (*size).max(1) as usize;
+                    let chunks: Vec<Value> = items.chunks(n)
+                        .map(|c| Value::List(c.to_vec()))
+                        .collect();
+                    Ok(Some(Value::List(chunks)))
+                }
+                _ => Err(RuntimeError { message: "List.chunk expects (List, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.uniq" | "List.unique" => match args.first() {
+                Some(Value::List(items)) => {
+                    let mut seen = Vec::new();
+                    let mut out = Vec::new();
+                    for item in items {
+                        if !seen.iter().any(|s: &Value| s == item) {
+                            seen.push(item.clone());
+                            out.push(item.clone());
+                        }
+                    }
+                    Ok(Some(Value::List(out)))
+                }
+                _ => Err(RuntimeError { message: "List.uniq expects (List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.take" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(n))) => {
+                    let n = (*n).max(0) as usize;
+                    Ok(Some(Value::List(items.iter().take(n).cloned().collect())))
+                }
+                _ => Err(RuntimeError { message: "List.take expects (List, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.drop" => match (args.first(), args.get(1)) {
+                (Some(Value::List(items)), Some(Value::Int(n))) => {
+                    let n = (*n).max(0) as usize;
+                    Ok(Some(Value::List(items.iter().skip(n).cloned().collect())))
+                }
+                _ => Err(RuntimeError { message: "List.drop expects (List, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.last" => match args.first() {
+                Some(Value::List(items)) => {
+                    Ok(Some(match items.last() {
+                        Some(v) => Value::Variant { name: "Some".into(), payload: vec![v.clone()] },
+                        None => Value::Variant { name: "None".into(), payload: vec![] },
+                    }))
+                }
+                _ => Err(RuntimeError { message: "List.last expects (List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.reverse" => match args.first() {
+                Some(Value::List(items)) => {
+                    let mut rev = items.clone();
+                    rev.reverse();
+                    Ok(Some(Value::List(rev)))
+                }
+                _ => Err(RuntimeError { message: "List.reverse expects (List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "List.count" => {
+                let (list, callable) = match (args.first(), args.get(1)) {
+                    (Some(l), Some(c)) => (l.clone(), c.clone()),
+                    _ => return Err(RuntimeError { message: "List.count expects (List, fn_ref)".into(), span: None, propagated_err: None, propagated_none: false }),
+                };
+                if let Value::List(items) = list {
+                    let mut count = 0i64;
+                    for item in items {
+                        let r = self.call_callable(callable.clone(), vec![item], Span::default())?;
+                        if r == Value::Bool(true) { count += 1; }
+                    }
+                    Ok(Some(Value::Int(count)))
+                } else {
+                    Err(RuntimeError { message: "List.count expects (List, fn_ref)".into(), span: None, propagated_err: None, propagated_none: false })
+                }
+            }
            // Map stdlib
             "Map.new" => Ok(Some(Value::Map(HashMap::new()))),
             "Map.insert" => match (args.first(), args.get(1), args.get(2)) {
@@ -2456,6 +2554,36 @@ impl Interpreter {
                 propagated_none: false,
                 }),
             },
+            "Map.size" => match args.first() {
+                Some(Value::Map(m)) => Ok(Some(Value::Int(m.len() as i64))),
+                _ => Err(RuntimeError { message: "Map.size expects a Map".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Map.merge" => match (args.first(), args.get(1)) {
+                (Some(Value::Map(a)), Some(Value::Map(b))) => {
+                    let mut merged = a.clone();
+                    for (k, v) in b.iter() {
+                        merged.insert(k.clone(), v.clone());
+                    }
+                    Ok(Some(Value::Map(merged)))
+                }
+                _ => Err(RuntimeError { message: "Map.merge expects (Map, Map)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Map.map_values" => {
+                let (map_val, callable) = match (args.first(), args.get(1)) {
+                    (Some(m), Some(c)) => (m.clone(), c.clone()),
+                    _ => return Err(RuntimeError { message: "Map.map_values expects (Map, fn_ref)".into(), span: None, propagated_err: None, propagated_none: false }),
+                };
+                if let Value::Map(m) = map_val {
+                    let mut out = HashMap::new();
+                    for (k, v) in m.iter() {
+                        let new_v = self.call_callable(callable.clone(), vec![v.clone()], Span::default())?;
+                        out.insert(k.clone(), new_v);
+                    }
+                    Ok(Some(Value::Map(out)))
+                } else {
+                    Err(RuntimeError { message: "Map.map_values expects (Map, fn_ref)".into(), span: None, propagated_err: None, propagated_none: false })
+                }
+            }
             // Result / Option variant constructors
             "Ok" => {
                 let v = args.first().cloned().unwrap_or(Value::Unit);
@@ -3518,6 +3646,37 @@ impl Interpreter {
                     }
                 }
                 _ => Err(RuntimeError { message: "Str.char_at expects (String, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Str.format" => match (args.first(), args.get(1)) {
+                (Some(Value::String(template)), Some(Value::List(fmtargs))) => {
+                    let mut result = template.clone();
+                    for arg in fmtargs {
+                        let s = display_value(arg);
+                        if let Some(pos) = result.find("{}") {
+                            result.replace_range(pos..pos+2, &s);
+                        }
+                    }
+                    Ok(Some(Value::String(result)))
+                }
+                _ => Err(RuntimeError { message: "Str.format expects (String, List)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Str.lines" => match args.first() {
+                Some(Value::String(s)) => {
+                    let lines: Vec<Value> = s.lines().map(|l| Value::String(l.to_string())).collect();
+                    Ok(Some(Value::List(lines)))
+                }
+                _ => Err(RuntimeError { message: "Str.lines expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Str.is_empty" => match args.first() {
+                Some(Value::String(s)) => Ok(Some(Value::Bool(s.is_empty()))),
+                _ => Err(RuntimeError { message: "Str.is_empty expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Str.count" => match (args.first(), args.get(1)) {
+                (Some(Value::String(s)), Some(Value::String(sub))) => {
+                    let count = s.matches(sub.as_str()).count() as i64;
+                    Ok(Some(Value::Int(count)))
+                }
+                _ => Err(RuntimeError { message: "Str.count expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             _ => Ok(None),
         }

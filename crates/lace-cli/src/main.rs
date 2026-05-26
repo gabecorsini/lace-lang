@@ -1336,32 +1336,113 @@ fn run_doc(path: Option<PathBuf>) -> Result<()> {
     };
     fs::create_dir_all(&out_dir).context("failed to create docs/ directory")?;
 
-    // CSS (inlined into index.html)
+    // CSS (inlined — aligned with docs/site/style.css palette)
     let css = r#"
-:root { --bg: #1a1b26; --surface: #24283b; --border: #414868; --text: #c0caf5; --muted: #565f89; --accent: #7aa2f7; --green: #9ece6a; --yellow: #e0af68; --red: #f7768e; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; line-height: 1.6; }
-header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; }
-header h1 { font-size: 1.4rem; color: var(--accent); }
-header .subtitle { color: var(--muted); font-size: 0.9rem; }
-main { max-width: 900px; margin: 2rem auto; padding: 0 1.5rem; }
-h2 { color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; margin: 2rem 0 1rem; font-size: 1.2rem; }
-.item-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.item-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; text-decoration: none; color: inherit; transition: border-color 0.15s; }
-.item-card:hover { border-color: var(--accent); }
-.item-card .kind { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; }
-.kind-fn { background: #1a2f4a; color: var(--accent); }
-.kind-record { background: #1f3a1f; color: var(--green); }
-.kind-tool { background: #3a2f1a; color: var(--yellow); }
-.item-card .name { font-weight: 600; font-size: 1rem; margin: 0.3rem 0 0.2rem; }
-.item-card .doc-preview { color: var(--muted); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-pre { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; overflow-x: auto; font-size: 0.9rem; }
-code { font-family: 'Fira Code', 'Cascadia Code', monospace; }
-.doc-text { margin: 1.25rem 0; line-height: 1.8; }
-.meta { color: var(--muted); font-size: 0.85rem; margin-top: 1rem; }
-a.back { color: var(--accent); text-decoration: none; display: inline-block; margin-bottom: 1.5rem; }
-a.back:hover { text-decoration: underline; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; font-size: 16px; }
+body { background: #0d1117; color: #e6edf3; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.7; min-height: 100vh; display: flex; flex-direction: column; }
+a { color: #58a6ff; text-decoration: none; transition: color 0.15s ease; }
+a:hover { color: #79b8ff; text-decoration: underline; }
+/* Nav */
+.topnav { position: sticky; top: 0; z-index: 100; background: #161b22; border-bottom: 1px solid #21262d; height: 56px; display: flex; align-items: center; padding: 0 1.5rem; gap: 2rem; }
+.topnav h1 { font-size: 1.2rem; font-weight: 700; color: #f0f6fc; }
+.topnav .subtitle { color: #8b949e; font-size: 0.88rem; }
+/* Layout */
+.page-wrap { display: flex; flex: 1; max-width: 1100px; margin: 0 auto; width: 100%; padding: 0 1rem; gap: 2rem; }
+/* Sidebar */
+aside { width: 220px; flex-shrink: 0; padding: 1.5rem 0; position: sticky; top: 56px; max-height: calc(100vh - 56px); overflow-y: auto; }
+aside .search-box { width: 100%; padding: 0.4rem 0.7rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 0.88rem; margin-bottom: 1rem; outline: none; }
+aside .search-box:focus { border-color: #58a6ff; }
+aside .toc-section { margin-bottom: 1rem; }
+aside .toc-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; margin-bottom: 0.4rem; }
+aside .toc-link { display: block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.88rem; color: #8b949e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+aside .toc-link:hover { background: #161b22; color: #58a6ff; text-decoration: none; }
+/* Content */
+.content { flex: 1; padding: 2rem 0; min-width: 0; }
+/* Search */
+.top-search { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 1.5rem; }
+.top-search input { flex: 1; padding: 0.5rem 0.9rem; background: #161b22; border: 1px solid #30363d; border-radius: 8px; color: #e6edf3; font-size: 0.95rem; outline: none; }
+.top-search input:focus { border-color: #58a6ff; }
+.no-results { color: #8b949e; font-size: 0.95rem; padding: 1rem 0; display: none; }
+/* Item cards */
+.item-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.item-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 1rem 1.25rem; text-decoration: none; color: inherit; transition: border-color 0.15s; display: block; }
+.item-card:hover { border-color: #58a6ff; text-decoration: none; }
+.item-card .card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
+.kind { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; }
+.kind-fn { background: #1c2d3e; color: #58a6ff; }
+.kind-record { background: #1a3025; color: #3fb950; }
+.kind-tool { background: #2d2208; color: #d29922; }
+.item-card .name { font-weight: 600; font-size: 1rem; color: #f0f6fc; }
+.item-card pre { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 0.7rem 1rem; overflow-x: auto; font-size: 0.85rem; margin: 0.5rem 0; }
+code { font-family: "Fira Code", "Cascadia Code", "Consolas", monospace; }
+.doc-preview { color: #8b949e; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-full { color: #c9d1d9; font-size: 0.95rem; line-height: 1.8; margin: 0.75rem 0; }
+.meta { color: #6e7681; font-size: 0.82rem; margin-top: 0.5rem; }
+/* Item detail page */
+.detail-header { margin-bottom: 1.5rem; }
+.detail-header h2 { font-size: 1.5rem; color: #f0f6fc; display: flex; align-items: center; gap: 0.6rem; margin-top: 0; border-bottom: 1px solid #21262d; padding-bottom: 0.5rem; }
+.back-link { display: inline-flex; align-items: center; gap: 0.3rem; color: #58a6ff; font-size: 0.9rem; margin-bottom: 1.2rem; }
+.back-link:hover { text-decoration: underline; }
 "#;
+
+    // JS for client-side search (index page)
+    let search_js = r#"
+(function() {
+  var input = document.getElementById('search-input');
+  var cards = Array.from(document.querySelectorAll('.item-card[data-name]'));
+  var noResults = document.querySelector('.no-results');
+  var tocLinks = Array.from(document.querySelectorAll('.toc-link[data-name]'));
+  function filter() {
+    var q = input.value.trim().toLowerCase();
+    var visible = 0;
+    cards.forEach(function(card) {
+      var name = card.dataset.name.toLowerCase();
+      var kind = card.dataset.kind.toLowerCase();
+      var doc = (card.dataset.doc || '').toLowerCase();
+      var match = !q || name.includes(q) || kind.includes(q) || doc.includes(q);
+      card.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+    tocLinks.forEach(function(link) {
+      var name = link.dataset.name.toLowerCase();
+      link.style.display = (!q || name.includes(q)) ? '' : 'none';
+    });
+    noResults.style.display = (visible === 0 && q) ? '' : 'none';
+  }
+  input.addEventListener('input', filter);
+  // Also wire sidebar search
+  var sideInput = document.getElementById('sidebar-search');
+  if (sideInput) {
+    sideInput.addEventListener('input', function() {
+      input.value = sideInput.value;
+      filter();
+    });
+  }
+})();
+"#;
+
+    // Build sidebar ToC entries grouped by kind
+    let toc_html: String = {
+        let kinds = ["fn", "tool", "record", "enum"];
+        let mut parts = Vec::new();
+        for kind in &kinds {
+            let items_of_kind: Vec<_> = all_items.iter().filter(|i| i.kind == *kind).collect();
+            if items_of_kind.is_empty() { continue; }
+            let links: String = items_of_kind.iter().map(|item| {
+                let slug = format!("{}-{}.html", item.kind, slug_name(&item.name));
+                format!(r#"<a class="toc-link" href="{slug}" data-name="{name}">{name}</a>"#,
+                    slug = slug,
+                    name = html_escape(&item.name))
+            }).collect::<Vec<_>>().join("\n");
+            parts.push(format!(
+                r#"<div class="toc-section"><div class="toc-label">{kind}</div>{links}</div>"#,
+                kind = kind,
+                links = links
+            ));
+        }
+        parts.join("\n")
+    };
 
     // Generate individual item pages
     for item in &all_items {
@@ -1376,19 +1457,28 @@ a.back:hover { text-decoration: underline; }
 <style>{css}</style>
 </head>
 <body>
-<header><h1>Lace Docs</h1><span class="subtitle">{kind} {name}</span></header>
-<main>
-<a class="back" href="index.html">← Back to index</a>
+<nav class="topnav"><h1>Lace Docs</h1><span class="subtitle">{kind} {name}</span></nav>
+<div class="page-wrap">
+<aside>
+<input class="search-box" id="sidebar-search" type="search" placeholder="Search…" />
+{toc}
+</aside>
+<div class="content">
+<a class="back-link" href="index.html">← All items</a>
+<div class="detail-header">
 <h2><span class="kind kind-{kind}">{kind}</span> {name}</h2>
+</div>
 <pre><code>{sig}</code></pre>
-<div class="doc-text">{doc}</div>
+<div class="doc-full">{doc}</div>
 <p class="meta">Defined in <code>{src}</code></p>
-</main>
+</div>
+</div>
 </body>
 </html>"#,
             name = html_escape(&item.name),
             kind = item.kind,
             css = css,
+            toc = toc_html,
             sig = html_escape(&item.signature),
             doc = html_escape(&item.doc).replace('\n', "<br>"),
             src = html_escape(&item.source_file),
@@ -1397,21 +1487,21 @@ a.back:hover { text-decoration: underline; }
             .with_context(|| format!("failed to write {slug}"))?;
     }
 
-    // Generate index.html
+    // Generate index.html with sidebar, search, and cards
     let item_rows: String = all_items
         .iter()
         .map(|item| {
             let slug = format!("{}-{}.html", item.kind, slug_name(&item.name));
             let preview = item.doc.lines().next().unwrap_or("").to_string();
             format!(
-                r#"<a class="item-card" href="{slug}">
-  <span class="kind kind-{kind}">{kind}</span>
-  <div class="name">{name}</div>
+                r#"<a class="item-card" href="{slug}" data-name="{name}" data-kind="{kind}" data-doc="{doc_data}">
+  <div class="card-header"><span class="kind kind-{kind}">{kind}</span><span class="name">{name}</span></div>
   <div class="doc-preview">{preview}</div>
 </a>"#,
                 slug = slug,
                 kind = item.kind,
                 name = html_escape(&item.name),
+                doc_data = html_escape(&preview),
                 preview = html_escape(&preview),
             )
         })
@@ -1428,18 +1518,30 @@ a.back:hover { text-decoration: underline; }
 <style>{css}</style>
 </head>
 <body>
-<header><h1>Lace Docs</h1><span class="subtitle">{count} documented item(s)</span></header>
-<main>
-<h2>All Items</h2>
+<nav class="topnav"><h1>Lace Docs</h1><span class="subtitle">{count} documented item(s)</span></nav>
+<div class="page-wrap">
+<aside>
+<input class="search-box" id="sidebar-search" type="search" placeholder="Filter…" />
+{toc}
+</aside>
+<div class="content">
+<div class="top-search">
+  <input id="search-input" type="search" placeholder="Search functions, types, tools…" autofocus />
+</div>
+<p class="no-results">No items match your search.</p>
 <div class="item-list">
 {rows}
 </div>
-</main>
+</div>
+</div>
+<script>{js}</script>
 </body>
 </html>"#,
         css = css,
         count = all_items.len(),
+        toc = toc_html,
         rows = item_rows,
+        js = search_js,
     );
     fs::write(out_dir.join("index.html"), &index_html).context("failed to write docs/index.html")?;
 
