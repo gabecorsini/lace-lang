@@ -537,7 +537,12 @@ impl Interpreter {
         use_decl: &UseDecl,
     ) -> Result<(), RuntimeError> {
         // Convert dotted path to filesystem path: net.http_tools -> net/http_tools.lace
-        let rel_path: PathBuf = use_decl.path.iter().collect::<PathBuf>().with_extension("lace");
+        // Special case: path is a single string that's already a file path (from `use "./file.lace"`)
+        let rel_path: PathBuf = if use_decl.path.len() == 1 && (use_decl.path[0].contains('/') || use_decl.path[0].ends_with(".lace")) {
+            PathBuf::from(&use_decl.path[0])
+        } else {
+            use_decl.path.iter().collect::<PathBuf>().with_extension("lace")
+        };
 
         // Try relative to current file's directory first
         let candidate = base_dir.join(&rel_path);
@@ -701,7 +706,7 @@ impl Interpreter {
         let alias = module_name.clone();
         for item in &program.items {
             match item {
-                TopLevelItem::Function(f) if f.is_pub => {
+                TopLevelItem::Function(f) if f.is_pub || use_decl.imports.is_none() => {
                     let qualified = format!("{}.{}", alias, f.name);
                     // Function was registered under "<canon_str>.<name>" by register_items
                     let canon_key = format!("{}.{}", canon_str, f.name);
@@ -742,6 +747,12 @@ impl Interpreter {
                         self.eval_expr(&c.expr).ok()
                     };
                     if let Some(v) = v {
+                        self.env.define(qualified, v);
+                    }
+                }
+                TopLevelItem::Statement(Stmt::Let(binding)) => {
+                    let qualified = format!("{}.{}", alias, binding.name);
+                    if let Some(v) = self.env.get(&binding.name) {
                         self.env.define(qualified, v);
                     }
                 }
@@ -936,7 +947,15 @@ impl Interpreter {
                 }
                 TopLevelItem::TypeAlias(_)
                 | TopLevelItem::Extern(_)
-                | TopLevelItem::Statement(_) => {}
+                | TopLevelItem::Statement(Stmt::Expr(_)) => {}
+                // Top-level `let` bindings — alias them under alias.name
+                TopLevelItem::Statement(Stmt::Let(binding)) => {
+                    let qualified = format!("{}.{}", alias, binding.name);
+                    if let Some(v) = self.env.get(&binding.name) {
+                        self.env.define(qualified, v);
+                    }
+                }
+                TopLevelItem::Statement(_) => {}
             }
         }
 
@@ -4941,6 +4960,14 @@ impl Interpreter {
                 true
             }
             Pattern::Tuple(parts, _) => {
+                // Empty pattern [] also matches empty List
+                if parts.is_empty() {
+                    return match value {
+                        Value::Tuple(v) => v.is_empty(),
+                        Value::List(v) => v.is_empty(),
+                        _ => false,
+                    };
+                }
                 if let Value::Tuple(values) = value {
                     if parts.len() != values.len() {
                         return false;

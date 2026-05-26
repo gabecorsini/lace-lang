@@ -128,6 +128,27 @@ impl Parser {
 
     fn parse_use_decl(&mut self) -> Option<UseDecl> {
         let start = self.expect(TokenKind::Use)?.span.start;
+        // Allow `use "./file.lace"` as sugar for `import "./file.lace" as <stem>`
+        if let TokenKind::StringLit(_) = self.peek_kind() {
+            let file_path = self.expect_string()?;
+            let alias = if self.match_tok(&TokenKind::As) {
+                self.expect_ident()?
+            } else {
+                // Derive alias from filename stem: "./utils.lace" -> "utils"
+                std::path::Path::new(&file_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("module")
+                    .replace(['-', '.'], "_")
+            };
+            let end = self.prev_span().end;
+            return Some(UseDecl {
+                path: vec![file_path],
+                imports: None,
+                alias: Some(alias),
+                span: Span { start, end },
+            });
+        }
         let path = self.parse_module_path()?;
         // Check for `as alias` (for file-based module imports)
         let alias = if self.match_tok(&TokenKind::As) {
@@ -1189,8 +1210,13 @@ impl Parser {
                            start: lhs.span().start,
                            end: self.prev_span().end.max(field_start),
                        };
-                       // Enum.Variant — unit variant access, represent as Ident(variant_name)
-                       lhs = Expr::Ident(variant_name, span);
+                       // BUG-009: `obj.UPPER` with no parens is a field access (e.g. mathlib.PI),
+                       // NOT an enum unit-variant. Emit FieldAccess so the runtime can resolve it.
+                       lhs = Expr::FieldAccess {
+                           target: Box::new(lhs),
+                           field: variant_name,
+                           span,
+                       };
                    }
                } else {
                    let name = self.expect_ident()?;

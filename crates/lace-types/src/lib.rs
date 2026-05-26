@@ -171,6 +171,15 @@ pub fn check_program_full(program: &Program) -> (Vec<TypeError>, Vec<TypeWarning
     for import in &program.imports {
         checker.scopes[0].vars.insert(import.alias.clone(), Type::Dynamic);
     }
+    // Register `use` module aliases (including `use "./file.lace"` sugar) as Dynamic
+    for use_decl in &program.uses {
+        let alias = use_decl.alias.clone().unwrap_or_else(|| {
+            use_decl.path.last().cloned().unwrap_or_default()
+        });
+        if !alias.is_empty() {
+            checker.scopes[0].vars.insert(alias, Type::Dynamic);
+        }
+    }
     checker.collect_signatures(program);
     checker.check(program);
 
@@ -1374,6 +1383,10 @@ impl Checker {
             // Named("Fn",[]) is compatible with Fn(..) types and vice versa
             (Type::Named(na, args_a), Type::Fn(_, _)) if na == "Fn" && args_a.is_empty() => return true,
             (Type::Fn(_, _), Type::Named(nb, args_b)) if nb == "Fn" && args_b.is_empty() => return true,
+            // List/Option/Map with Unknown inner — e.g. [] is List(Unknown), compatible with any List
+            (Type::List(ia), Type::List(ib)) => return self.compatible(ia, ib),
+            (Type::Option(ia), Type::Option(ib)) => return self.compatible(ia, ib),
+            (Type::Map(ka, va), Type::Map(kb, vb)) => return self.compatible(ka, kb) && self.compatible(va, vb),
             _ => {}
         }
         a == b
