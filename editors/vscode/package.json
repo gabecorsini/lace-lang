@@ -1,0 +1,52 @@
+{
+  "name": "lace-lang",
+  "displayName": "Lace Language",
+  "description": "Lace language support — syntax highlighting, diagnostics, hover",
+  "version": "0.1.0",
+  "publisher": "lace",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:lace"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "lace",
+        "aliases": [
+          "Lace",
+          "lace"
+        ],
+        "extensions": [
+          ".lace"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lace",
+        "scopeName": "source.lace",
+        "path": "./syntaxes/lace.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/vscode": "^1.75.0",
+    "typescript": "*"
+  }
+}

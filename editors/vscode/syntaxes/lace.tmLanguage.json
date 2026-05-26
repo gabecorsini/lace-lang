@@ -1,0 +1,76 @@
+{
+  "name": "source.lace",
+  "scopeName": "source.lace",
+  "fileTypes": ["lace"],
+  "patterns": [
+    { "include": "#doc-comment" },
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#effect-annotation" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#builtin-value" },
+    { "include": "#function-def" },
+    { "include": "#number" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "doc-comment": {
+      "match": "##.*$",
+      "name": "comment.line.double-hash.lace"
+    },
+    "comment": {
+      "match": "#.*$",
+      "name": "comment.line.hash.lace"
+    },
+    "string": {
+      "name": "string.quoted.double.lace",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.lace",
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.lace" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.lace" } },
+          "patterns": [{ "include": "$self" }]
+        },
+        {
+          "name": "constant.character.escape.lace",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "effect-annotation": {
+      "match": "\\[(IO|Pure|ToolCall)\\]",
+      "name": "storage.modifier.effect.lace"
+    },
+    "keyword": {
+      "match": "\\b(fn|let|mut|if|else|match|for|while|return|import|use|as|pub|enum|record|const|type|tool|extern|in)\\b",
+      "name": "keyword.control.lace"
+    },
+    "type": {
+      "match": "\\b(String|Int|Float|Bool|List|Map|Option|Result|Unit|Dynamic)\\b",
+      "name": "support.type.lace"
+    },
+    "builtin-value": {
+      "match": "\\b(true|false|None)\\b",
+      "name": "constant.language.lace"
+    },
+    "function-def": {
+      "match": "\\bfn\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "entity.name.function.lace" }
+      }
+    },
+    "number": {
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b",
+      "name": "constant.numeric.lace"
+    },
+    "operator": {
+      "match": "->|=>|\\?|\\+\\+|//|==|!=|<=|>=",
+      "name": "keyword.operator.lace"
+    }
+  }
+}
