@@ -1384,7 +1384,12 @@ impl Interpreter {
                             .map(|a| self.eval_expr(a))
                             .collect::<Result<Vec<_>, _>>()?;
                         args.append(&mut rhs_args);
-                        self.call_function(&call.method, args, call.span)
+                        // If target is a module identifier (e.g. List, Map), qualify the name
+                        let fn_name = match &*call.target {
+                            Expr::Ident(module, _) => format!("{}.{}", module, call.method),
+                            _ => call.method.clone(),
+                        };
+                        self.call_function(&fn_name, args, call.span)
                     }
                     Expr::Ident(name, _) => self.call_function(name, vec![left_v], *span),
                     _ => Err(RuntimeError {

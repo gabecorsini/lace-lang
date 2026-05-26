@@ -14,8 +14,12 @@ use lace_effects::{check_program as check_effects, EffectIssue, IssueLevel};
 use lace_interp::{run_function_with_options, run_with_options, RunOptions, RuntimeError, Value};
 use lace_parser::{parse_program, ParseError};
 use lace_types::{check_program_full, TypeError, TypeWarning};
+use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::highlight::Highlighter;
+use rustyline::hint::Hinter;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::{Context, DefaultEditor, Editor, Helper};
 use serde::Deserialize;
 
 // ─── Manifest ────────────────────────────────────────────────────────────────
@@ -189,6 +193,23 @@ enum Commands {
     Lint {
         /// The .lace file to lint
         file: PathBuf,
+    },
+    /// Run benchmark functions (prefixed with bench_) and report timing
+    Bench {
+        /// The .lace file containing benchmark functions
+        file: PathBuf,
+        /// Only run benchmarks whose name contains this substring
+        #[arg(long)]
+        filter: Option<String>,
+    },
+    /// Bundle a .lace file into a self-contained executable shell script
+    #[command(name = "script-bundle")]
+    ScriptBundle {
+        /// The .lace source file to bundle
+        file: PathBuf,
+        /// Output path (defaults to ./<stem>)
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -496,10 +517,17 @@ fn run() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Commands::Bench { file, filter } => {
+            run_bench(&file, filter.as_deref())?;
+        }
+        Commands::ScriptBundle { file, output } => {
+            run_script_bundle(&file, output.as_deref())?;
+        }
     }
-
     Ok(())
 }
+
+// ─── lace build
 
 // ─── resolve_entrypoint ───────────────────────────────────────────────────────
 
@@ -2069,4 +2097,328 @@ fn run_watch(file: &Path, no_warnings: bool) -> Result<()> {
             run_once(&file, no_warnings);
         }
     }
+}
+
+// ─── LaceHelper (Completer + Hinter for REPL) ────────────────────────────────
+
+/// Module → list of member function names for REPL completion
+static MODULE_MEMBERS: &[(&str, &[&str])] = &[
+    ("List", &["map", "filter", "reduce", "fold", "length", "head", "tail", "cons", "append", "concat", "reverse", "sort", "sort_by", "contains", "find", "index_of", "zip", "unzip", "flat_map", "flatten", "take", "drop", "take_while", "drop_while", "partition", "enumerate", "sum", "product", "min", "max", "any", "all", "count", "unique", "range", "repeat", "join", "first", "last", "nth", "is_empty"]),
+    ("Map", &["new", "get", "set", "delete", "contains_key", "keys", "values", "entries", "merge", "map", "filter", "size", "is_empty", "from_list"]),
+    ("Str", &["length", "concat", "slice", "split", "join", "trim", "trim_start", "trim_end", "to_upper", "to_lower", "contains", "starts_with", "ends_with", "replace", "replace_all", "find", "index_of", "chars", "bytes", "parse_int", "parse_float", "format", "repeat", "pad_start", "pad_end", "is_empty", "lines", "from_char"]),
+    ("Math", &["abs", "floor", "ceil", "round", "sqrt", "pow", "exp", "log", "log2", "log10", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "min", "max", "clamp", "pi", "e", "infinity", "nan", "is_nan", "is_infinite", "sign", "hypot"]),
+    ("Int", &["to_string", "to_float", "to_hex", "to_binary", "from_string", "from_hex", "abs", "min", "max", "clamp", "pow", "gcd", "lcm", "is_even", "is_odd", "bit_and", "bit_or", "bit_xor", "bit_not", "shift_left", "shift_right"]),
+    ("Float", &["to_string", "to_int", "abs", "floor", "ceil", "round", "sqrt", "pow", "is_nan", "is_infinite", "is_finite", "min", "max", "clamp", "from_string"]),
+    ("Json", &["parse", "stringify", "stringify_pretty", "to_string"]),
+    ("Http", &["get", "post", "put", "delete", "patch", "request", "get_text", "post_json"]),
+    ("Shell", &["run", "run_output", "run_lines", "env", "cwd", "set_env"]),
+    ("Fs", &["read", "write", "append", "exists", "delete", "copy", "move", "mkdir", "list", "list_recursive", "read_lines", "stat", "is_file", "is_dir"]),
+    ("Regex", &["match_", "match_all", "replace", "replace_all", "split", "is_match", "captures", "new"]),
+];
+
+const REPL_KEYWORDS: &[&str] = &["let", "fn", "match", "if", "else", "enum", "record", "use", "true", "false", "return", "mut"];
+
+/// Combined Helper struct that implements both Completer, Hinter, Highlighter, Validator
+pub struct LaceHelper;
+
+impl LaceHelper {
+    pub fn new() -> Self {
+        LaceHelper
+    }
+}
+
+impl Helper for LaceHelper {}
+
+impl Completer for LaceHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        _ctx: &Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Pair>)> {
+        let word_start = line[..pos]
+            .rfind(|c: char| c == ' ' || c == '(' || c == ',' || c == '\t')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let word = &line[word_start..pos];
+
+        let mut candidates: Vec<Pair> = Vec::new();
+
+        // Check if word contains a dot — module member completion
+        if let Some(dot_pos) = word.rfind('.') {
+            let module = &word[..dot_pos];
+            let member_prefix = &word[dot_pos + 1..];
+            for (mod_name, members) in MODULE_MEMBERS {
+                if *mod_name == module {
+                    for m in *members {
+                        if m.starts_with(member_prefix) {
+                            candidates.push(Pair {
+                                display: format!("{}.{}", mod_name, m),
+                                replacement: format!("{}.{}", mod_name, m),
+                            });
+                        }
+                    }
+                    break;
+                }
+            }
+            // Return replacements relative to word_start
+            return Ok((word_start, candidates));
+        }
+
+        // Module name completion (including dot)
+        for (mod_name, _) in MODULE_MEMBERS {
+            let with_dot = format!("{}.", mod_name);
+            if with_dot.starts_with(word) || mod_name.starts_with(word) {
+                candidates.push(Pair {
+                    display: with_dot.clone(),
+                    replacement: with_dot,
+                });
+            }
+        }
+
+        // Keyword completion
+        for kw in REPL_KEYWORDS {
+            if kw.starts_with(word) {
+                candidates.push(Pair {
+                    display: kw.to_string(),
+                    replacement: kw.to_string(),
+                });
+            }
+        }
+
+        Ok((word_start, candidates))
+    }
+}
+
+impl Hinter for LaceHelper {
+    type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        if pos < line.len() {
+            return None;
+        }
+        let word_start = line[..pos]
+            .rfind(|c: char| c == ' ' || c == '(' || c == ',' || c == '\t')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let word = &line[word_start..pos];
+        if word.is_empty() {
+            return None;
+        }
+
+        // Try module member hints
+        if let Some(dot_pos) = word.rfind('.') {
+            let module = &word[..dot_pos];
+            let member_prefix = &word[dot_pos + 1..];
+            for (mod_name, members) in MODULE_MEMBERS {
+                if *mod_name == module {
+                    for m in *members {
+                        if m.starts_with(member_prefix) && *m != member_prefix {
+                            return Some(format!("\x1b[2m{}\x1b[0m", &m[member_prefix.len()..]));
+                        }
+                    }
+                    break;
+                }
+            }
+            return None;
+        }
+
+        // Try keyword hints
+        for kw in REPL_KEYWORDS {
+            if kw.starts_with(word) && *kw != word {
+                return Some(format!("\x1b[2m{}\x1b[0m", &kw[word.len()..]));
+            }
+        }
+
+        // Try module name hints
+        for (mod_name, _) in MODULE_MEMBERS {
+            let candidate = format!("{}.", mod_name);
+            if candidate.starts_with(word) && candidate != word {
+                return Some(format!("\x1b[2m{}\x1b[0m", &candidate[word.len()..]));
+            }
+        }
+
+        None
+    }
+}
+
+impl Highlighter for LaceHelper {}
+
+impl Validator for LaceHelper {
+    fn validate(&self, _ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
+        Ok(ValidationResult::Valid(None))
+    }
+}
+
+// ─── run_bench ────────────────────────────────────────────────────────────────
+
+fn collect_benches(program: &lace_ast::Program) -> Vec<lace_ast::FnDecl> {
+    program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            TopLevelItem::Function(f) if f.name.starts_with("bench_") => Some(f.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn format_duration_per_iter(ns: f64) -> String {
+    if ns < 1_000.0 {
+        format!("{:.1} ns/iter", ns)
+    } else if ns < 1_000_000.0 {
+        format!("{:.2} μs/iter", ns / 1_000.0)
+    } else {
+        format!("{:.2} ms/iter", ns / 1_000_000.0)
+    }
+}
+
+fn run_bench(file: &Path, filter: Option<&str>) -> Result<()> {
+    let source = load_source(file)?;
+    let (program, _) = validate_source(&source)?;
+
+    let mut benches = collect_benches(&program);
+    if let Some(f) = filter {
+        benches.retain(|b| b.name.contains(f));
+    }
+
+    if benches.is_empty() {
+        println!("{}", "no benchmarks found".yellow());
+        return Ok(());
+    }
+
+    println!("\nrunning {} benchmark{}", benches.len(), if benches.len() == 1 { "" } else { "s" });
+
+    let name_width = benches.iter().map(|b| b.name.len()).max().unwrap_or(0);
+
+    for bench in &benches {
+        let opts = RunOptions {
+            checkpoint_path: None,
+            replay_mode: false,
+            source_path: Some(file.display().to_string()),
+            suppress_tool_log: true,
+            log_file: None,
+        };
+
+        // Warmup run
+        let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+
+        // First pass: 100 iterations
+        let iters: u64 = 100;
+        let t0 = Instant::now();
+        for _ in 0..iters {
+            let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+        }
+        let elapsed_ns = t0.elapsed().as_nanos() as f64;
+        let avg_ns_100 = elapsed_ns / iters as f64;
+        let total_ms_100 = elapsed_ns / 1_000_000.0;
+
+        // If total > 1ms, do 1000 iterations for more precision
+        let avg_ns = if total_ms_100 > 1.0 {
+            let iters2: u64 = 1000;
+            let t1 = Instant::now();
+            for _ in 0..iters2 {
+                let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+            }
+            t1.elapsed().as_nanos() as f64 / iters2 as f64
+        } else {
+            avg_ns_100
+        };
+
+        println!(
+            "{:<width$}  ...  {}",
+            bench.name,
+            format_duration_per_iter(avg_ns),
+            width = name_width
+        );
+    }
+
+    println!();
+    Ok(())
+}
+
+// ─── run_script_bundle ───────────────────────────────────────────────────────
+
+/// Resolve `use "./something.lace"` imports and inline them, returning combined source.
+fn inline_use_imports(source: &str, base_dir: &Path) -> String {
+    let mut result = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        // Match: use "./some/path.lace"  or  use './some/path.lace'
+        if trimmed.starts_with("use ") {
+            let rest = trimmed.trim_start_matches("use ").trim();
+            let path_str = rest
+                .trim_matches('"')
+                .trim_matches('\'');
+            if path_str.starts_with("./") || path_str.starts_with("../") {
+                let import_path = base_dir.join(path_str);
+                if let Ok(imported) = fs::read_to_string(&import_path) {
+                    result.push_str(&format!("# inlined from: {}\n", path_str));
+                    // Recursively inline the imported file's own imports
+                    let sub_dir = import_path.parent().unwrap_or(base_dir);
+                    result.push_str(&inline_use_imports(&imported, sub_dir));
+                    result.push('\n');
+                    continue; // skip the `use` directive itself
+                }
+            }
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    result
+}
+
+fn run_script_bundle(file: &Path, output: Option<&Path>) -> Result<()> {
+    let source = fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+
+    let base_dir = file.parent().unwrap_or(Path::new("."));
+    let bundled_source = inline_use_imports(&source, base_dir);
+
+    let out_path = match output {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let stem = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            PathBuf::from(format!("./{}", stem))
+        }
+    };
+
+    let script = format!(
+        r#"#!/bin/sh
+# Generated by lace build — https://lace-lang.org
+TMPFILE=$(mktemp /tmp/lace-XXXXXX.lace)
+cat > "$TMPFILE" << 'LACE_SOURCE_EOF'
+{source}
+LACE_SOURCE_EOF
+lace run "$TMPFILE"
+STATUS=$?
+rm -f "$TMPFILE"
+exit $STATUS
+"#,
+        source = bundled_source
+    );
+
+    fs::write(&out_path, &script)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
+
+    // chmod +x
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&out_path)?.permissions();
+        perms.set_mode(perms.mode() | 0o111);
+        fs::set_permissions(&out_path, perms)?;
+    }
+
+    println!(
+        "{} {} (shell-script bundle)",
+        "created:".green().bold(),
+        out_path.display()
+    );
+    Ok(())
 }
