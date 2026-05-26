@@ -848,7 +848,7 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
     );
     println!(
         "{}",
-        "Commands: :quit, :q, :reset, :checkpoint <path>, :replay <path>; end line with \\ for multiline"
+        "Type :help for available commands. Use up-arrow for history. Brace-balanced multiline supported."
             .dimmed()
     );
 
@@ -866,15 +866,36 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
     }
 
     loop {
-        let mut line = match rl.readline("lace> ") {
+        let line = match rl.readline("lace> ") {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
             Err(e) => return Err(anyhow::anyhow!("repl input failed: {e}")),
         };
 
+        // Brace-balanced multiline: collect until braces balance
+        let mut full_input = line.clone();
+        loop {
+            let opens: usize = full_input.chars().filter(|&c| c == '{').count();
+            let closes: usize = full_input.chars().filter(|&c| c == '}').count();
+            let trimmed_check = full_input.trim_end();
+            let ends_brace = trimmed_check.ends_with('{');
+            if opens <= closes && !ends_brace {
+                break;
+            }
+            let cont = match rl.readline("... ") {
+                Ok(s) => s,
+                Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
+                Err(e) => return Err(anyhow::anyhow!("repl multiline input failed: {e}")),
+            };
+            full_input.push('\n');
+            full_input.push_str(&cont);
+        }
+
+        // Legacy backslash continuation (still supported)
+        let mut line = full_input;
         while line.trim_end().ends_with('\\') {
             line.pop();
-            let cont = match rl.readline(".... ") {
+            let cont = match rl.readline("... ") {
                 Ok(s) => s,
                 Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => break,
                 Err(e) => return Err(anyhow::anyhow!("repl multiline input failed: {e}")),
@@ -892,9 +913,22 @@ fn run_repl(checkpoint: Option<PathBuf>, replay: Option<PathBuf>) -> Result<()> 
         if trimmed == ":quit" || trimmed == ":q" {
             break;
         }
-        if trimmed == ":reset" {
+        if trimmed == ":help" {
+            println!("{}", "Available REPL commands:".bold());
+            println!("  :help                     — show this help");
+            println!("  :quit, :q                 — exit the REPL");
+            println!("  :clear, :reset            — reset interpreter state (clear session)");
+            println!("  :checkpoint <path>        — set checkpoint path for tool calls");
+            println!("  :replay <path>            — enable replay mode from checkpoint");
+            println!();
+            println!("{}", "Multiline input:".bold());
+            println!("  Brace-balanced: continue typing after '{{'; braces close automatically");
+            println!("  Backslash: end line with \\ to continue on next line");
+            continue;
+        }
+        if trimmed == ":reset" || trimmed == ":clear" {
             session_lines.clear();
-            println!("{}", "session reset".green());
+            println!("{}", "session cleared".green());
             continue;
         }
 
@@ -1637,8 +1671,8 @@ fn fmt_fn_decl(f: &lace_ast::FnDecl) -> String {
 }
 
 fn fmt_block(block: &lace_ast::Block, indent: usize) -> String {
-    let pad = "  ".repeat(indent + 1);
-    let close_pad = "  ".repeat(indent);
+    let pad = "    ".repeat(indent + 1);
+    let close_pad = "    ".repeat(indent);
     let mut lines = vec!["{".to_string()];
     for stmt in &block.stmts {
         lines.push(format!("{}{}", pad, fmt_stmt(stmt, indent + 1)));
