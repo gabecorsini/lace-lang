@@ -249,7 +249,7 @@ fn run() -> Result<()> {
                         }
                     }
                     Err(err) => {
-                        report_runtime_error(&source, &err);
+                        report_runtime_error_with_file(&source, &err, Some(&file.display().to_string()));
                         anyhow::bail!("runtime execution failed");
                     }
                 }
@@ -363,7 +363,7 @@ fn run() -> Result<()> {
                     );
                 }
                 Err(err) => {
-                    report_runtime_error(&source, &err);
+                    report_runtime_error_with_file(&source, &err, Some(&file.display().to_string()));
                     anyhow::bail!("replay execution failed");
                 }
             }
@@ -1112,16 +1112,24 @@ fn type_error_span(err: &TypeError) -> Option<(usize, usize)> {
 }
 
 fn report_runtime_error(source: &str, err: &RuntimeError) {
-    eprintln!("{}: {}", "runtime error".red().bold(), err.message);
+    report_runtime_error_with_file(source, err, None);
+}
+
+fn report_runtime_error_with_file(source: &str, err: &RuntimeError, file: Option<&str>) {
+    eprintln!("{} {}", "error:".red().bold(), err.message);
     if let Some(span) = err.span {
         eprintln!(
             "{}",
-            render_span_excerpt(source, span.start, span.end).dimmed()
+            render_span_excerpt_with_file(source, span.start, span.end, file).dimmed()
         );
     }
 }
 
 fn render_span_excerpt(source: &str, span_start: usize, span_end: usize) -> String {
+    render_span_excerpt_with_file(source, span_start, span_end, None)
+}
+
+fn render_span_excerpt_with_file(source: &str, span_start: usize, span_end: usize, file: Option<&str>) -> String {
     let starts = line_starts(source);
     let (line, col) = offset_to_line_col(span_start, source, &starts);
     let line_text = source_line(source, line).unwrap_or("");
@@ -1139,7 +1147,11 @@ fn render_span_excerpt(source: &str, span_start: usize, span_end: usize) -> Stri
     caret.push_str(&" ".repeat(col.saturating_sub(1)));
     caret.push_str(&"^".repeat(caret_width));
 
-    format!("--> line {line}, col {col}\n{gutter}{line_text}\n{caret}")
+    let location = match file {
+        Some(f) => format!("  --> {}:{}:{}", f, line, col),
+        None => format!("  --> {}:{}", line, col),
+    };
+    format!("{location}\n{gutter}{line_text}\n{caret}")
 }
 
 fn line_starts(source: &str) -> Vec<usize> {
@@ -1982,7 +1994,7 @@ fn run_watch(file: &Path, no_warnings: bool) -> Result<()> {
                         }
                     }
                     Err(err) => {
-                        report_runtime_error(&source, &err);
+                        report_runtime_error_with_file(&source, &err, Some(&p.display().to_string()));
                     }
                 }
             }
