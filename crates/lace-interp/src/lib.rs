@@ -3818,8 +3818,8 @@ impl Interpreter {
             "Fs.read" => match args.first() {
                 Some(Value::String(path)) => {
                     match fs::read_to_string(path) {
-                        Ok(content) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::String(content)] })),
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Ok(content) => Ok(Some(Value::String(content))),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.read error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.read expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
@@ -3831,8 +3831,8 @@ impl Interpreter {
                         let _ = fs::create_dir_all(parent);
                     }
                     match fs::write(p, content) {
-                        Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.write error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.write expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
@@ -3845,10 +3845,10 @@ impl Interpreter {
                     }
                     match OpenOptions::new().create(true).append(true).open(p) {
                         Ok(mut file) => match file.write_all(content.as_bytes()) {
-                            Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
-                            Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                            Ok(()) => Ok(Some(Value::Unit)),
+                            Err(e) => Err(RuntimeError { message: format!("Fs.append error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                         },
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.append error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.append expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
@@ -3860,8 +3860,8 @@ impl Interpreter {
             "Fs.delete" => match args.first() {
                 Some(Value::String(path)) => {
                     match fs::remove_file(path) {
-                        Ok(()) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Unit] })),
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.delete error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.delete expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
@@ -3875,9 +3875,9 @@ impl Interpreter {
                                 names.push(Value::String(entry.file_name().to_string_lossy().to_string()));
                             }
                             names.sort_by(|a, b| cmp_values(a, b));
-                            Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::List(names)] }))
+                            Ok(Some(Value::List(names)))
                         }
-                        Err(e) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e.to_string())] })),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.list_dir error: {}", e), span: None, propagated_err: None, propagated_none: false }),
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.list_dir expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),

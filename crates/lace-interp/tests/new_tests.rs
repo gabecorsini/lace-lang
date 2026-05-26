@@ -766,10 +766,7 @@ fn main() -> Unit [IO] {
     Fs.read("/tmp/lace_fs_test_rw.txt")
 }
 "#).unwrap();
-    assert_eq!(result, Value::Variant {
-        name: "Ok".into(),
-        payload: vec![Value::String("hello lace".into())],
-    });
+    assert_eq!(result, Value::String("hello lace".into()));
 }
 
 #[test]
@@ -787,8 +784,8 @@ fn test_fs_exists_false() {
 
 #[test]
 fn test_fs_read_missing() {
-    let result = run(r#"fn main() -> Unit [IO] { Fs.read("/tmp/no_such_file_lace_xyz.txt") }"#).unwrap();
-    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Err"));
+    let result = run(r#"fn main() -> Unit [IO] { Fs.read("/tmp/no_such_file_lace_xyz.txt") }"#);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -796,16 +793,11 @@ fn test_fs_append() {
     let _ = run(r#"fn main() -> Unit [IO] { Fs.write("/tmp/lace_append_test.txt", "line1\n") }"#);
     let _ = run(r#"fn main() -> Unit [IO] { Fs.append("/tmp/lace_append_test.txt", "line2\n") }"#);
     let result = run(r#"fn main() -> Unit [IO] { Fs.read("/tmp/lace_append_test.txt") }"#).unwrap();
-    if let Value::Variant { name, payload } = result {
-        assert_eq!(name, "Ok");
-        if let Some(Value::String(s)) = payload.first() {
-            assert!(s.contains("line1"));
-            assert!(s.contains("line2"));
-        } else {
-            panic!("expected string payload");
-        }
+    if let Value::String(s) = result {
+        assert!(s.contains("line1"));
+        assert!(s.contains("line2"));
     } else {
-        panic!("expected Ok variant");
+        panic!("expected string result");
     }
 }
 
@@ -813,7 +805,7 @@ fn test_fs_append() {
 fn test_fs_delete() {
     let _ = run(r#"fn main() -> Unit [IO] { Fs.write("/tmp/lace_delete_test.txt", "bye") }"#);
     let del = run(r#"fn main() -> Unit [IO] { Fs.delete("/tmp/lace_delete_test.txt") }"#).unwrap();
-    assert!(matches!(del, Value::Variant { ref name, .. } if name == "Ok"));
+    assert_eq!(del, Value::Unit);
     let exists = run(r#"fn main() -> Unit [IO] { Fs.exists("/tmp/lace_delete_test.txt") }"#).unwrap();
     assert_eq!(exists, Value::Bool(false));
 }
@@ -821,7 +813,7 @@ fn test_fs_delete() {
 #[test]
 fn test_fs_list_dir() {
     let result = run(r#"fn main() -> Unit [IO] { Fs.list_dir("/tmp") }"#).unwrap();
-    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Ok"));
+    assert!(matches!(result, Value::List(_)));
 }
 
 // ── Time module tests ────────────────────────────────────────────────────────

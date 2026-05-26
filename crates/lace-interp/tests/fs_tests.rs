@@ -27,10 +27,7 @@ fn test_fs_write_and_read() {
     let src = format!(r#"
 fn main() -> String [IO] {{
     Fs.write("{}/hello.txt", "hello world")
-    match Fs.read("{}/hello.txt") {{
-        Ok(s) => s
-        Err(e) => e
-    }}
+    Fs.read("{}/hello.txt")
 }}
 "#, tmp, tmp);
     assert_eq!(run(&src).unwrap(), Value::String("hello world".into()));
@@ -135,10 +132,7 @@ fn test_fs_append() {
 fn main() -> String [IO] {{
     Fs.write("{}/app.txt", "line1\n")
     Fs.append("{}/app.txt", "line2\n")
-    match Fs.read("{}/app.txt") {{
-        Ok(s) => s
-        Err(e) => e
-    }}
+    Fs.read("{}/app.txt")
 }}
 "#, tmp, tmp, tmp);
     assert_eq!(run(&src).unwrap(), Value::String("line1\nline2\n".into()));
@@ -164,10 +158,7 @@ fn test_fs_copy() {
 fn main() -> String [IO] {{
     Fs.write("{}/src.txt", "copied")
     Fs.copy("{}/src.txt", "{}/dst.txt")
-    match Fs.read("{}/dst.txt") {{
-        Ok(s) => s
-        Err(e) => e
-    }}
+    Fs.read("{}/dst.txt")
 }}
 "#, tmp, tmp, tmp, tmp);
     assert_eq!(run(&src).unwrap(), Value::String("copied".into()));
