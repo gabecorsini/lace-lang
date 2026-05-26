@@ -42,6 +42,10 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Str.char_at", "Str.contains", "Str.ends_with", "Str.index_of", "Str.join",
         "Str.len", "Str.pad_left", "Str.pad_right", "Str.repeat", "Str.replace",
         "Str.slice", "Str.split", "Str.starts_with", "Str.to_lower", "Str.to_upper", "Str.trim",
+        // BUG-005: String.* as alias for Str.*
+        "String.char_at", "String.contains", "String.ends_with", "String.index_of", "String.join",
+        "String.len", "String.pad_left", "String.pad_right", "String.repeat", "String.replace",
+        "String.slice", "String.split", "String.starts_with", "String.to_lower", "String.to_upper", "String.trim",
         "Time.format", "Time.now", "Time.now_ms", "Time.parse", "Time.parse_date", "Time.since",
     ];
     let best = KNOWN_METHODS.iter()
@@ -1655,6 +1659,14 @@ impl Interpreter {
     }
 
     fn call_builtin(&mut self, name: &str, args: &[Value]) -> Result<Option<Value>, RuntimeError> {
+        // BUG-005: normalize String.* → Str.* so both module names work
+        let normalized;
+        let name = if let Some(rest) = name.strip_prefix("String.") {
+            normalized = format!("Str.{rest}");
+            normalized.as_str()
+        } else {
+            name
+        };
         match name {
             "print" | "println" => {
                 if let Some(entry) = self.replay_entry_for(name, "IO") {
@@ -3473,6 +3485,21 @@ impl Interpreter {
         args: Vec<Value>,
         span: Span,
     ) -> Result<Value, RuntimeError> {
+        // Chained call: f(a)(b) — parser emits MethodCall(f(a), "__call__", [b])
+        if method == "__call__" {
+            return match target {
+                Value::Closure { params, body, captured_env } => {
+                    self.call_closure_value(params, body, captured_env, args, span)
+                }
+                other => Err(RuntimeError {
+                    message: format!("value is not callable: {}", display_value(&other)),
+                    span: Some(span),
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            };
+        }
+
         // Module method dispatch: e.g. List.range(0, 10) where target is Value::String("List")
         if let Value::String(module_name) = &target {
             let qualified = format!("{}.{}", module_name, method);

@@ -232,10 +232,11 @@ impl Checker {
         self.scopes[0].vars.insert("File".into(), Type::Dynamic);
         self.scopes[0].vars.insert("Map".into(), Type::Dynamic);
 
+        // BUG-001: print/println accept Dynamic so any value can be passed without to_string()
         self.fn_sigs
-            .insert("print".into(), (vec![Type::String], Type::Unit));
+            .insert("print".into(), (vec![Type::Dynamic], Type::Unit));
         self.fn_sigs
-            .insert("println".into(), (vec![Type::String], Type::Unit));
+            .insert("println".into(), (vec![Type::Dynamic], Type::Unit));
         self.fn_sigs
             .insert("type_of".into(), (vec![Type::Dynamic], Type::String));
         self.fn_sigs
@@ -344,6 +345,39 @@ impl Checker {
             "Map.new".into(),
             (vec![], Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))),
         );
+        // Str stdlib (BUG-002: was missing entirely)
+        self.scopes[0].vars.insert("Str".into(), Type::Dynamic);
+        self.fn_sigs.insert("Str.len".into(), (vec![Type::String], Type::Int));
+        self.fn_sigs.insert("Str.to_upper".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("Str.to_lower".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("Str.trim".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("Str.split".into(), (vec![Type::String, Type::String], Type::List(Box::new(Type::String))));
+        self.fn_sigs.insert("Str.starts_with".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("Str.ends_with".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("Str.contains".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("Str.replace".into(), (vec![Type::String, Type::String, Type::String], Type::String));
+        self.fn_sigs.insert("Str.slice".into(), (vec![Type::String, Type::Int, Type::Int], Type::String));
+        self.fn_sigs.insert("Str.pad_left".into(), (vec![Type::String, Type::Int, Type::String], Type::String));
+        self.fn_sigs.insert("Str.pad_right".into(), (vec![Type::String, Type::Int, Type::String], Type::String));
+        self.fn_sigs.insert("Str.repeat".into(), (vec![Type::String, Type::Int], Type::String));
+        self.fn_sigs.insert("Str.chars".into(), (vec![Type::String], Type::List(Box::new(Type::String))));
+        self.fn_sigs.insert("Str.join".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::String], Type::String));
+        // BUG-005: String.* as alias for Str.*
+        self.scopes[0].vars.insert("String".into(), Type::Dynamic);
+        self.fn_sigs.insert("String.len".into(), (vec![Type::String], Type::Int));
+        self.fn_sigs.insert("String.to_upper".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("String.to_lower".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("String.trim".into(), (vec![Type::String], Type::String));
+        self.fn_sigs.insert("String.split".into(), (vec![Type::String, Type::String], Type::List(Box::new(Type::String))));
+        self.fn_sigs.insert("String.starts_with".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("String.ends_with".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("String.contains".into(), (vec![Type::String, Type::String], Type::Bool));
+        self.fn_sigs.insert("String.replace".into(), (vec![Type::String, Type::String, Type::String], Type::String));
+        self.fn_sigs.insert("String.slice".into(), (vec![Type::String, Type::Int, Type::Int], Type::String));
+        self.fn_sigs.insert("String.repeat".into(), (vec![Type::String, Type::Int], Type::String));
+        self.fn_sigs.insert("String.chars".into(), (vec![Type::String], Type::List(Box::new(Type::String))));
+        self.fn_sigs.insert("String.join".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::String], Type::String));
+
         self.fn_sigs.insert(
             "Map.insert".into(),
             (
@@ -1267,6 +1301,12 @@ impl Checker {
             TypeExpr::Named { name, .. } => {
                 if name == "Dynamic" {
                     Type::Dynamic
+                } else if name == "List" {
+                    // BUG-012: bare `List` without type param → List<Dynamic>
+                    Type::List(Box::new(Type::Dynamic))
+                } else if name == "Map" {
+                    // bare `Map` → Map<String, Dynamic>
+                    Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))
                 } else if name.len() == 1
                     && name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
                 {

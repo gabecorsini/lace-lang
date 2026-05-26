@@ -1,4 +1,4 @@
 fn main() -> Unit [IO] {
-    let who = "Lace"
-    println("hello, " ++ who)
+  let who = "Lace"
+  println("hello, " ++ who)
 }

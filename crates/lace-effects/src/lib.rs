@@ -158,6 +158,10 @@ pub fn check_program(program: &Program) -> Vec<EffectIssue> {
 
 impl<'a> Checker<'a> {
     fn validate_function(&mut self, function: &'a FnDecl) {
+        // BUG-014: fn main() is the entry point — it implicitly has all effects
+        if function.name == "main" {
+            return;
+        }
         if function.effects.is_empty() {
             self.issues.push(EffectIssue {
                 function: function.name.clone(),
