@@ -1428,3 +1428,223 @@ fn main() -> Int [IO] {
 "#;
     assert_eq!(run(src).unwrap(), Value::Int(1));
 }
+
+// ── New stdlib tests ────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_zip() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.zip([1, 2, 3], ["a", "b", "c"])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![
+            Value::Tuple(vec![Value::Int(1), Value::String("a".into())]),
+            Value::Tuple(vec![Value::Int(2), Value::String("b".into())]),
+            Value::Tuple(vec![Value::Int(3), Value::String("c".into())]),
+        ])
+    );
+}
+
+#[test]
+fn test_list_enumerate() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.enumerate(["a", "b", "c"])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![
+            Value::Tuple(vec![Value::Int(0), Value::String("a".into())]),
+            Value::Tuple(vec![Value::Int(1), Value::String("b".into())]),
+            Value::Tuple(vec![Value::Int(2), Value::String("c".into())]),
+        ])
+    );
+}
+
+#[test]
+fn test_list_flatten() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.flatten([[1, 2], [3, 4], [5]])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![
+            Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4), Value::Int(5),
+        ])
+    );
+}
+
+#[test]
+fn test_list_chunk() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.chunk([1, 2, 3, 4, 5], 2)
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![
+            Value::List(vec![Value::Int(1), Value::Int(2)]),
+            Value::List(vec![Value::Int(3), Value::Int(4)]),
+            Value::List(vec![Value::Int(5)]),
+        ])
+    );
+}
+
+#[test]
+fn test_list_take() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.take([1, 2, 3, 4, 5], 3)
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
+}
+
+#[test]
+fn test_list_drop() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.drop([1, 2, 3, 4, 5], 2)
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![Value::Int(3), Value::Int(4), Value::Int(5)])
+    );
+}
+
+#[test]
+fn test_list_reverse() {
+    let src = r#"
+fn main() -> List [Pure] {
+    List.reverse([1, 2, 3])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![Value::Int(3), Value::Int(2), Value::Int(1)])
+    );
+}
+
+#[test]
+fn test_list_last() {
+    let src = r#"
+fn main() -> Option [Pure] {
+    List.last([10, 20, 30])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::Variant { name: "Some".into(), payload: vec![Value::Int(30)] }
+    );
+}
+
+#[test]
+fn test_list_last_empty() {
+    let src = r#"
+fn main() -> Option [Pure] {
+    List.last([])
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::Variant { name: "None".into(), payload: vec![] }
+    );
+}
+
+#[test]
+fn test_map_merge() {
+    let src = r#"
+fn main() -> Map [Pure] {
+    let a = Map.insert(Map.new(), "x", 1)
+    let b = Map.insert(Map.new(), "y", 2)
+    Map.merge(a, b)
+}
+"#;
+    let result = run(src).unwrap();
+    if let Value::Map(m) = result {
+        assert_eq!(m.get("x"), Some(&Value::Int(1)));
+        assert_eq!(m.get("y"), Some(&Value::Int(2)));
+    } else {
+        panic!("expected Map");
+    }
+}
+
+#[test]
+fn test_map_contains_key() {
+    let src = r#"
+fn main() -> Bool [Pure] {
+    let m = Map.insert(Map.new(), "hello", 42)
+    Map.contains_key(m, "hello")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_map_size() {
+    let src = r#"
+fn main() -> Int [Pure] {
+    let m = Map.insert(Map.insert(Map.new(), "a", 1), "b", 2)
+    Map.size(m)
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(2));
+}
+
+#[test]
+fn test_str_format() {
+    let src = r#"
+fn main() -> String [Pure] {
+    Str.format("{} + {} = {}", [1, 2, 3])
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::String("1 + 2 = 3".into()));
+}
+
+#[test]
+fn test_str_lines() {
+    let src = r#"
+fn main() -> List [Pure] {
+    Str.lines("hello\nworld\nfoo")
+}
+"#;
+    assert_eq!(
+        run(src).unwrap(),
+        Value::List(vec![
+            Value::String("hello".into()),
+            Value::String("world".into()),
+            Value::String("foo".into()),
+        ])
+    );
+}
+
+#[test]
+fn test_str_is_empty() {
+    let src = r#"
+fn main() -> Bool [Pure] {
+    Str.is_empty("")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Bool(true));
+}
+
+#[test]
+fn test_str_count() {
+    let src = r#"
+fn main() -> Int [Pure] {
+    Str.count("hello world hello", "hello")
+}
+"#;
+    assert_eq!(run(src).unwrap(), Value::Int(2));
+}

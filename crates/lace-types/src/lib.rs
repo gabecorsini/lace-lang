@@ -456,6 +456,25 @@ impl Checker {
                 Type::Int,
             ),
         );
+        // New Map stdlib
+        self.fn_sigs.insert("Map.size".into(), (vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))], Type::Int));
+        self.fn_sigs.insert("Map.merge".into(), (vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)), Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))], Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("Map.map_values".into(), (vec![Type::Map(Box::new(Type::String), Box::new(Type::Dynamic)), Type::Dynamic], Type::Map(Box::new(Type::String), Box::new(Type::Dynamic))));
+        // New List stdlib
+        self.fn_sigs.insert("List.enumerate".into(), (vec![Type::List(Box::new(Type::Dynamic))], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.flatten".into(), (vec![Type::List(Box::new(Type::Dynamic))], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.chunk".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::Int], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.uniq".into(), (vec![Type::List(Box::new(Type::Dynamic))], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.take".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::Int], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.drop".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::Int], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.last".into(), (vec![Type::List(Box::new(Type::Dynamic))], Type::Dynamic));
+        self.fn_sigs.insert("List.reverse".into(), (vec![Type::List(Box::new(Type::Dynamic))], Type::List(Box::new(Type::Dynamic))));
+        self.fn_sigs.insert("List.count".into(), (vec![Type::List(Box::new(Type::Dynamic)), Type::Dynamic], Type::Int));
+        // New Str stdlib
+        self.fn_sigs.insert("Str.format".into(), (vec![Type::String, Type::List(Box::new(Type::Dynamic))], Type::String));
+        self.fn_sigs.insert("Str.lines".into(), (vec![Type::String], Type::List(Box::new(Type::String))));
+        self.fn_sigs.insert("Str.is_empty".into(), (vec![Type::String], Type::Bool));
+        self.fn_sigs.insert("Str.count".into(), (vec![Type::String, Type::String], Type::Int));
         // Result / Option variant constructors
         self.fn_sigs
             .insert("Ok".into(), (vec![Type::Dynamic], Type::Dynamic));
