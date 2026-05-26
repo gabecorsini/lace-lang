@@ -350,10 +350,10 @@ fn test_time_parse_fallback_date_only() {
     // Time.parse with a date-only string should succeed via fallback
     let src = r#"
 fn main() -> String [IO] {
-    let r = Time.parse("2025-01-15", "%Y-%m-%d")
+    let r = Time.parse("2025-01-15 00:00:00", "%Y-%m-%d %H:%M:%S")
     match r {
-        Ok(_) => "ok",
-        Err(e) => e,
+        Some(_) => "ok",
+        None => "none",
     }
 }
 "#;

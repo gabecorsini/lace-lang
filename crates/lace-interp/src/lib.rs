@@ -46,7 +46,8 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Map.from_pairs", "Map.update",
         "Tuple.first", "Tuple.second", "Tuple.to_list",
         "Process.run", "Process.run_args",
-        "Process.env",
+        "Process.env", "Process.exit", "Process.exit_success", "Process.exit_failure", "Process.pid",
+        "Args.all", "Args.get", "Args.count", "Args.program",
         "Shell.run", "Shell.capture", "Shell.success", "Shell.env", "Shell.set_env",
         "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
         "Regex.replace", "Regex.replace_all",
@@ -373,6 +374,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Args".into(), Value::String("Args".into()));
         self.env.define("Shell".into(), Value::String("Shell".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
         self.env.define("Math".into(), Value::String("Math".into()));
@@ -441,6 +443,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Args".into(), Value::String("Args".into()));
         self.env.define("Shell".into(), Value::String("Shell".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
 
@@ -4007,8 +4010,8 @@ impl Interpreter {
             },
             // ── Time stdlib ──────────────────────────────────────────────────
             "Time.now" => {
-                let val = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
-                Ok(Some(Value::Int(val)))
+                let val = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64();
+                Ok(Some(Value::Float(val)))
             }
             "Time.now_ms" => {
                 let val = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
@@ -4019,20 +4022,17 @@ impl Interpreter {
                     let dt: DateTime<Utc> = Utc.timestamp_opt(*ts, 0).single().unwrap_or_else(Utc::now);
                     Ok(Some(Value::String(dt.format(fmt).to_string())))
                 }
-                _ => Err(RuntimeError { message: "Time.format expects (Int, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+                (Some(Value::Float(ts)), Some(Value::String(fmt))) => {
+                    let dt: DateTime<Utc> = Utc.timestamp_opt(*ts as i64, 0).single().unwrap_or_else(Utc::now);
+                    Ok(Some(Value::String(dt.format(fmt).to_string())))
+                }
+                _ => Err(RuntimeError { message: "Time.format expects (Float|Int, String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             "Time.parse" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(fmt))) => {
                     match NaiveDateTime::parse_from_str(s, fmt) {
-                        Ok(ndt) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(ndt.and_utc().timestamp())] })),
-                        Err(_) => {
-                            // Fallback: try date-only by appending T00:00:00
-                            let s2 = format!("{}T00:00:00", s);
-                            match NaiveDateTime::parse_from_str(&s2, "%Y-%m-%dT%H:%M:%S") {
-                                Ok(ndt) => Ok(Some(Value::Variant { name: "Ok".into(), payload: vec![Value::Int(ndt.and_utc().timestamp())] })),
-                                Err(e2) => Ok(Some(Value::Variant { name: "Err".into(), payload: vec![Value::String(e2.to_string())] })),
-                            }
-                        }
+                        Ok(ndt) => Ok(Some(Value::Variant { name: "Some".into(), payload: vec![Value::Float(ndt.and_utc().timestamp() as f64)] })),
+                        Err(_) => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
                     }
                 }
                 _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
@@ -4360,6 +4360,47 @@ impl Interpreter {
                 (Some(Value::Float(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Float(x.clamp(*lo as f64, *hi as f64)))),
                 _ => Err(RuntimeError { message: "Float.clamp expects (Float, Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
+            "Time.sleep" => match args.first() {
+                Some(Value::Float(secs)) => {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(*secs));
+                    Ok(Some(Value::Unit))
+                }
+                Some(Value::Int(secs)) => {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(*secs as f64));
+                    Ok(Some(Value::Unit))
+                }
+                _ => Err(RuntimeError { message: "Time.sleep expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // ── Args stdlib ──────────────────────────────────────────────────
+            "Args.all" => {
+                let list: Vec<Value> = std::env::args().map(Value::String).collect();
+                Ok(Some(Value::List(list)))
+            }
+            "Args.get" => match args.first() {
+                Some(Value::Int(n)) => {
+                    match std::env::args().nth(*n as usize) {
+                        Some(s) => Ok(Some(Value::Variant { name: "Some".into(), payload: vec![Value::String(s)] })),
+                        None => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Args.get expects (Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Args.count" => {
+                Ok(Some(Value::Int(std::env::args().count() as i64)))
+            }
+            "Args.program" => {
+                Ok(Some(Value::String(std::env::args().next().unwrap_or_default())))
+            }
+            // ── Process extended ─────────────────────────────────────────────
+            "Process.exit" => match args.first() {
+                Some(Value::Int(code)) => std::process::exit(*code as i32),
+                _ => Err(RuntimeError { message: "Process.exit expects (Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Process.exit_success" => std::process::exit(0),
+            "Process.exit_failure" => std::process::exit(1),
+            "Process.pid" => {
+                Ok(Some(Value::Int(std::process::id() as i64)))
+            }
             _ => Ok(None),
         }
     }

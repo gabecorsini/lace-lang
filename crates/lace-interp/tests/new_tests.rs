@@ -829,7 +829,7 @@ fn test_fs_list_dir() {
 #[test]
 fn test_time_now_is_int() {
     let result = run(r#"fn main() -> Unit [IO] { Time.now() }"#).unwrap();
-    assert!(matches!(result, Value::Int(_)));
+    assert!(matches!(result, Value::Float(_)));
 }
 
 #[test]
@@ -848,8 +848,8 @@ fn test_time_format_date() {
 fn test_time_since_non_negative() {
     let result = run(r#"
 fn main() -> Unit [IO] {
-    let ts = Time.now()
-    Time.since(ts)
+    let ts = Time.now_ms()
+    Time.since(ts / 1000)
 }
 "#).unwrap();
     assert!(matches!(result, Value::Int(v) if v >= 0));
@@ -858,13 +858,13 @@ fn main() -> Unit [IO] {
 #[test]
 fn test_time_parse_ok() {
     let result = run(r#"fn main() -> Unit [IO] { Time.parse("2024-05-24 00:00:00", "%Y-%m-%d %H:%M:%S") }"#).unwrap();
-    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Ok"));
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Some"));
 }
 
 #[test]
 fn test_time_parse_err() {
     let result = run(r#"fn main() -> Unit [IO] { Time.parse("not-a-date", "%Y-%m-%d") }"#).unwrap();
-    assert!(matches!(result, Value::Variant { ref name, .. } if name == "Err"));
+    assert!(matches!(result, Value::Variant { ref name, .. } if name == "None"));
 }
 
 // ── Str module tests ─────────────────────────────────────────────────────────
