@@ -126,3 +126,11 @@ fn test_type_error_code_method() {
     };
     assert_eq!(err2.code(), "E002");
 }
+
+// ── E002: Int = String mismatch ─────────────────────────────────────────────
+#[test]
+fn test_int_string_assignment_is_e002() {
+    let src = r#"let x: Int = "oops""#;
+    let (errors, _) = type_check(src);
+    assert!(!errors.is_empty(), "expected E002 for let x: Int = \"oops\", got no errors");
+}

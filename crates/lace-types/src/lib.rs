@@ -715,6 +715,7 @@ impl Checker {
                 }
                 TopLevelItem::Function(f) => self.check_fn(f),
                 TopLevelItem::Tool(t) => self.check_tool_decl(t),
+                TopLevelItem::Statement(stmt) => self.check_stmt(stmt),
                 _ => {}
             }
         }
