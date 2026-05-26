@@ -1241,7 +1241,19 @@ impl Interpreter {
                 field,
                 span,
             } => {
-                let obj = self.eval_expr(target)?;
+                // If the target fails to evaluate (e.g. enum type name not in env),
+                // try looking up `field` directly as an enum variant or identifier.
+                let obj = match self.eval_expr(target) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // Fallback: treat as enum unit variant access (e.g. Color.Blue)
+                        if let Some(v) = self.env.get(field) {
+                            return Ok(v);
+                        }
+                        // Re-evaluate to surface the original error
+                        return self.eval_expr(target);
+                    }
+                };
                 match obj {
                     // Module ref: resolve const as qualified env lookup (e.g. math.pi)
                     // or return a function ref for method calls (e.g. math.add)
