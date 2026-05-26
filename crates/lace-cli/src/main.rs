@@ -707,6 +707,13 @@ fn run_new(name: &str) -> Result<()> {
     fs::write(project_dir.join("lib.lace"), lib_content)
         .context("failed to write lib.lace")?;
 
+    // lace.toml
+    let toml_content = format!(
+        "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nauthor = \"\"\ndescription = \"\"\n\n[build]\nmain = \"main.lace\"\n"
+    );
+    fs::write(project_dir.join("lace.toml"), &toml_content)
+        .context("failed to write lace.toml")?;
+
     // README.md
     let readme_content = format!(
         "# {name}\n\nA Lace project.\n\n## Getting Started\n\n```\nlace run main.lace\n```\n"

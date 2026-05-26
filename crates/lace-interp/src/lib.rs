@@ -4030,9 +4030,17 @@ impl Interpreter {
             },
             "Time.parse" => match (args.first(), args.get(1)) {
                 (Some(Value::String(s)), Some(Value::String(fmt))) => {
-                    match NaiveDateTime::parse_from_str(s, fmt) {
-                        Ok(ndt) => Ok(Some(Value::Variant { name: "Some".into(), payload: vec![Value::Float(ndt.and_utc().timestamp() as f64)] })),
-                        Err(_) => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
+                    let ts = chrono::NaiveDateTime::parse_from_str(s, fmt)
+                        .ok()
+                        .or_else(|| {
+                            chrono::NaiveDate::parse_from_str(s, fmt)
+                                .ok()
+                                .and_then(|d| d.and_hms_opt(0, 0, 0))
+                        })
+                        .map(|dt| dt.and_utc().timestamp() as f64);
+                    match ts {
+                        Some(v) => Ok(Some(Value::Variant { name: "Some".into(), payload: vec![Value::Float(v)] })),
+                        None => Ok(Some(Value::Variant { name: "None".into(), payload: vec![] })),
                     }
                 }
                 _ => Err(RuntimeError { message: "Time.parse expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),

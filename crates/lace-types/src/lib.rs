@@ -535,6 +535,11 @@ impl Checker {
             "Http.get_header".into(),
             (vec![Type::Dynamic, Type::Dynamic], Type::Dynamic),
         );
+        // Fs / Shell / Args / Tuple stdlib
+        self.scopes[0].vars.insert("Fs".into(), Type::Dynamic);
+        self.scopes[0].vars.insert("Shell".into(), Type::Dynamic);
+        self.scopes[0].vars.insert("Args".into(), Type::Dynamic);
+        self.scopes[0].vars.insert("Tuple".into(), Type::Dynamic);
         // Process stdlib
         self.scopes[0].vars.insert("Process".into(), Type::Dynamic);
         self.fn_sigs.insert(
@@ -927,6 +932,7 @@ impl Checker {
                 Literal::Bool(_) => Type::Bool,
             },
             Expr::Ident(name, span) => {
+                if name == "_" { return Type::Dynamic; }
                 self.used_idents.insert(name.clone());
                 if let Some(t) = self.lookup(name) {
                     t

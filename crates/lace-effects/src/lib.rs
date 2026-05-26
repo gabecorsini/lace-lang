@@ -162,6 +162,10 @@ impl<'a> Checker<'a> {
         if function.name == "main" {
             return;
         }
+        // test_ and bench_ functions are exempt from effect annotations
+        if function.name.starts_with("test_") || function.name.starts_with("bench_") {
+            return;
+        }
         if function.effects.is_empty() {
             self.issues.push(EffectIssue {
                 function: function.name.clone(),
