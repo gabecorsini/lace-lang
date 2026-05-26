@@ -1532,6 +1532,24 @@ impl Interpreter {
                     fields,
                 })
             }
+            Expr::MapLiteral { pairs, .. } => {
+                let mut map = HashMap::new();
+                for (k_expr, v_expr) in pairs {
+                    let k_span = k_expr.span();
+                    let k = self.eval_expr(k_expr)?;
+                    let v = self.eval_expr(v_expr)?;
+                    match k {
+                        Value::String(s) => { map.insert(s, v); }
+                        other => return Err(RuntimeError {
+                            message: format!("map literal key must be a string, got {:?}", other),
+                            span: Some(k_span),
+                            propagated_err: None,
+                            propagated_none: false,
+                        }),
+                    }
+                }
+                Ok(Value::Map(map))
+            }
             Expr::ListLiteral { elems, .. } => Ok(Value::List(
                 elems
                     .iter()

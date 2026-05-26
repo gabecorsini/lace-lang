@@ -1355,7 +1355,17 @@ impl Parser {
             }
             TokenKind::If => self.parse_if_expr(),
             TokenKind::Match => self.parse_match_expr(),
-            TokenKind::LBrace => self.parse_block().map(Expr::Block),
+            TokenKind::LBrace => {
+                // Look ahead: if `}` or `string_lit :`, treat as map literal
+                let is_map = self.peek_n_is(1, &TokenKind::RBrace)
+                    || (matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::StringLit(_)))
+                        && self.peek_n_is(2, &TokenKind::Colon));
+                if is_map {
+                    self.parse_map_literal()
+                } else {
+                    self.parse_block().map(Expr::Block)
+                }
+            }
             TokenKind::Return => {
                 self.bump();
                 let value = if self.at(&TokenKind::RBrace) {
@@ -1822,6 +1832,34 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn parse_map_literal(&mut self) -> Option<Expr> {
+        let start = self.expect(TokenKind::LBrace)?.span.start;
+        let mut pairs = Vec::new();
+        if !self.at(&TokenKind::RBrace) {
+            loop {
+                let key = self.parse_expr()?;
+                self.expect(TokenKind::Colon)?;
+                let val = self.parse_expr()?;
+                pairs.push((key, val));
+                if self.match_tok(&TokenKind::Comma) {
+                    if self.at(&TokenKind::RBrace) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(TokenKind::RBrace)?;
+        Some(Expr::MapLiteral {
+            pairs,
+            span: Span {
+                start,
+                end: self.prev_span().end,
+            },
+        })
     }
 
     fn parse_list_literal(&mut self) -> Option<Expr> {

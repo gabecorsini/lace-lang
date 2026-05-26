@@ -1228,6 +1228,13 @@ impl Checker {
                     Type::Unknown
                 }
             }
+            Expr::MapLiteral { pairs, .. } => {
+                for (k, v) in pairs {
+                    self.infer_expr(k);
+                    self.infer_expr(v);
+                }
+                Type::Dynamic
+            }
             Expr::ListLiteral { elems, .. } => {
                 if elems.is_empty() {
                     Type::List(Box::new(Type::Unknown))

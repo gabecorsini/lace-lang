@@ -326,6 +326,9 @@ impl<'a> Checker<'a> {
                 Expr::ListLiteral { elems, .. } | Expr::TupleLiteral { elems, .. } => {
                     8 + elems.iter().map(score_expr).sum::<i64>()
                 }
+                Expr::MapLiteral { pairs, .. } => {
+                    8 + pairs.iter().map(|(k, v)| score_expr(k) + score_expr(v)).sum::<i64>()
+                }
                 Expr::Return { value, .. } => value.as_ref().map(|v| score_expr(v)).unwrap_or(4),
                 Expr::Break { .. } | Expr::Continue { .. } => 1,
             }
@@ -528,6 +531,12 @@ impl<'a> Checker<'a> {
                     self.scan_expr_for_unhandled(e, function, false);
                 }
             }
+            Expr::MapLiteral { pairs, .. } => {
+                for (k, v) in pairs {
+                    self.scan_expr_for_unhandled(k, function, false);
+                    self.scan_expr_for_unhandled(v, function, false);
+                }
+            }
             Expr::Return { value, .. } => {
                 if let Some(v) = value {
                     self.scan_expr_for_unhandled(v, function, false);
@@ -683,6 +692,14 @@ impl<'a> Checker<'a> {
                 let mut out = EffectSet::empty();
                 for e in elems {
                     out = out.union(self.infer_expr_effects(e, fn_name, in_pure_block));
+                }
+                out
+            }
+            Expr::MapLiteral { pairs, .. } => {
+                let mut out = EffectSet::empty();
+                for (k, v) in pairs {
+                    out = out.union(self.infer_expr_effects(k, fn_name, in_pure_block));
+                    out = out.union(self.infer_expr_effects(v, fn_name, in_pure_block));
                 }
                 out
             }

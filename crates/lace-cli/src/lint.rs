@@ -205,6 +205,12 @@ fn lint_expr(
                 lint_expr(e, scope_stack, warnings);
             }
         }
+        Expr::MapLiteral { pairs, .. } => {
+            for (k, v) in pairs {
+                lint_expr(k, scope_stack, warnings);
+                lint_expr(v, scope_stack, warnings);
+            }
+        }
         Expr::RecordLiteral(r) => {
             for (_, val, _) in &r.fields {
                 lint_expr(val, scope_stack, warnings);

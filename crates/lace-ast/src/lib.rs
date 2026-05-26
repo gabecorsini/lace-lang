@@ -360,6 +360,10 @@ pub enum Expr {
     },
     Closure(ClosureExpr),
     RecordLiteral(RecordLiteralExpr),
+    MapLiteral {
+        pairs: Vec<(Expr, Expr)>,
+        span: Span,
+    },
     ListLiteral {
         elems: Vec<Expr>,
         span: Span,
@@ -391,6 +395,7 @@ impl Expr {
             | Expr::Ident(_, s)
             | Expr::ListLiteral { span: s, .. }
             | Expr::TupleLiteral { span: s, .. }
+            | Expr::MapLiteral { span: s, .. }
             | Expr::FieldAccess { span: s, .. }
             | Expr::Index { span: s, .. }
             | Expr::Pipeline { span: s, .. }
@@ -739,6 +744,12 @@ pub fn walk_expr<V: Visitor + ?Sized>(v: &mut V, expr: &Expr) {
         Expr::ListLiteral { elems, .. } | Expr::TupleLiteral { elems, .. } => {
             for e in elems {
                 v.visit_expr(e);
+            }
+        }
+        Expr::MapLiteral { pairs, .. } => {
+            for (k, val) in pairs {
+                v.visit_expr(k);
+                v.visit_expr(val);
             }
         }
         Expr::Return { value, .. } => {

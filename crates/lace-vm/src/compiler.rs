@@ -268,6 +268,7 @@ impl Compiler {
             Expr::Closure(_)
             | Expr::RecordLiteral(_)
             | Expr::TupleLiteral { .. }
+            | Expr::MapLiteral { .. }
             | Expr::Pipeline { .. }
             | Expr::Index { .. }
             | Expr::ErrorProp { .. }

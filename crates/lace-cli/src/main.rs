@@ -1895,6 +1895,10 @@ fn fmt_expr(expr: &lace_ast::Expr) -> String {
             let items = elems.iter().map(|e| fmt_expr(e)).collect::<Vec<_>>().join(", ");
             format!("[{items}]")
         }
+        Expr::MapLiteral { pairs, .. } => {
+            let items = pairs.iter().map(|(k, v)| format!("{}: {}", fmt_expr(k), fmt_expr(v))).collect::<Vec<_>>().join(", ");
+            format!("{{{items}}}")
+        }
         Expr::TupleLiteral { elems, .. } => {
             let items = elems.iter().map(|e| fmt_expr(e)).collect::<Vec<_>>().join(", ");
             format!("({items})")
