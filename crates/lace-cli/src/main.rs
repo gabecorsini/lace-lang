@@ -19,7 +19,7 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
-use rustyline::{Context, DefaultEditor, Editor, Helper};
+use rustyline::{Context as RustylineContext, DefaultEditor, Editor, Helper};
 use serde::Deserialize;
 
 // ─── Manifest ────────────────────────────────────────────────────────────────
@@ -2136,7 +2136,7 @@ impl Completer for LaceHelper {
         &self,
         line: &str,
         pos: usize,
-        _ctx: &Context<'_>,
+        _ctx: &RustylineContext<'_>,
     ) -> rustyline::Result<(usize, Vec<Pair>)> {
         let word_start = line[..pos]
             .rfind(|c: char| c == ' ' || c == '(' || c == ',' || c == '\t')
@@ -2195,7 +2195,7 @@ impl Completer for LaceHelper {
 impl Hinter for LaceHelper {
     type Hint = String;
 
-    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+    fn hint(&self, line: &str, pos: usize, _ctx: &RustylineContext<'_>) -> Option<String> {
         if pos < line.len() {
             return None;
         }
@@ -2276,7 +2276,8 @@ fn format_duration_per_iter(ns: f64) -> String {
 }
 
 fn run_bench(file: &Path, filter: Option<&str>) -> Result<()> {
-    let source = load_source(file)?;
+    let path_buf = file.to_path_buf();
+    let source = load_source(&path_buf)?;
     let (program, _) = validate_source(&source)?;
 
     let mut benches = collect_benches(&program);
@@ -2303,13 +2304,13 @@ fn run_bench(file: &Path, filter: Option<&str>) -> Result<()> {
         };
 
         // Warmup run
-        let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+        let _ = run_function_with_options(&program, &bench.name, opts.clone());
 
         // First pass: 100 iterations
         let iters: u64 = 100;
         let t0 = Instant::now();
         for _ in 0..iters {
-            let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+            let _ = run_function_with_options(&program, &bench.name, opts.clone());
         }
         let elapsed_ns = t0.elapsed().as_nanos() as f64;
         let avg_ns_100 = elapsed_ns / iters as f64;
@@ -2320,7 +2321,7 @@ fn run_bench(file: &Path, filter: Option<&str>) -> Result<()> {
             let iters2: u64 = 1000;
             let t1 = Instant::now();
             for _ in 0..iters2 {
-                let _ = run_function_with_options(&source, &bench.name, &[], opts.clone());
+                let _ = run_function_with_options(&program, &bench.name, opts.clone());
             }
             t1.elapsed().as_nanos() as f64 / iters2 as f64
         } else {
