@@ -25,6 +25,9 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "File.exists", "File.read", "File.write",
         "File.append",
         "Fs.append", "Fs.delete", "Fs.exists", "Fs.list_dir", "Fs.read", "Fs.write",
+        "Fs.list", "Fs.list_all", "Fs.mkdir", "Fs.remove", "Fs.copy", "Fs.move",
+        "Fs.stat", "Fs.join", "Fs.basename", "Fs.dirname", "Fs.extension",
+        "Fs.absolute", "Fs.cwd", "Fs.chdir",
         "Http.get", "Http.get_header", "Http.post", "Http.post_json",
         "Http.get_with_headers", "Http.response", "Http.serve", "Http.serve_routes",
         "Http.post_form", "Http.get_json",
@@ -1226,6 +1229,82 @@ impl Interpreter {
                 })
             }
             Expr::FnCall(call) => {
+                // Partial application: if any argument is `_` (wildcard ident), build a closure
+                let placeholder_indices: Vec<usize> = call.args.iter().enumerate()
+                    .filter_map(|(i, a)| if matches!(a, Expr::Ident(n, _) if n == "_") { Some(i) } else { None })
+                    .collect();
+                if !placeholder_indices.is_empty() {
+                    // Evaluate the non-placeholder args eagerly
+                    let mut partial_args: Vec<Option<Value>> = Vec::with_capacity(call.args.len());
+                    for (i, a) in call.args.iter().enumerate() {
+                        if placeholder_indices.contains(&i) {
+                            partial_args.push(None);
+                        } else {
+                            partial_args.push(Some(self.eval_expr(a)?));
+                        }
+                    }
+                    let fn_name = call.name.clone();
+                    let span = call.span;
+                    // Build param names for the closure: __p0, __p1, ...
+                    let new_params: Vec<String> = placeholder_indices.iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("__p{}", i))
+                        .collect();
+                    // Build a synthetic closure value that, when called, fills in the blanks
+                    // We do this by capturing everything and returning a Value::Closure with a synthetic body.
+                    // Instead, we return a native Rust closure via a captured environment approach:
+                    // Since Value::Closure uses a Block, we instead capture and use a special env trick.
+                    // Simpler: just capture as a Value::Closure using captured_env for the bound args,
+                    // and build a Block that calls fn_name with the mixed args.
+                    // Build: fn(__p0, ...) { fn_name(arg0_or_placeholder, ...) }
+                    // We encode the bound values in captured_env and reference them by generated names.
+                    let mut captured_env: HashMap<String, Value> = self.env.scopes
+                        .iter().flat_map(|s| s.iter().map(|(k,v)|(k.clone(),v.clone()))).collect();
+                    // Store bound arg values in captured env under generated names
+                    let mut placeholder_idx = 0usize;
+                    let mut bound_arg_names: Vec<Option<String>> = Vec::new();
+                    for (i, opt_val) in partial_args.iter().enumerate() {
+                        if let Some(val) = opt_val {
+                            let bound_name = format!("__bound_{}_{}", fn_name.replace('.', "_"), i);
+                            captured_env.insert(bound_name.clone(), val.clone());
+                            bound_arg_names.push(Some(bound_name));
+                        } else {
+                            bound_arg_names.push(None);
+                            placeholder_idx += 1;
+                        }
+                    }
+                    // Build AST for the call body: fn_name(__bound_x or __pN, ...)
+                    let _ = placeholder_idx;
+                    let mut call_args: Vec<Expr> = Vec::new();
+                    let dummy_span = lace_ast::Span { start: 0, end: 0 };
+                    let mut ph_idx = 0usize;
+                    for bound_name in &bound_arg_names {
+                        if let Some(name) = bound_name {
+                            call_args.push(Expr::Ident(name.clone(), dummy_span));
+                        } else {
+                            call_args.push(Expr::Ident(format!("__p{}", ph_idx), dummy_span));
+                            ph_idx += 1;
+                        }
+                    }
+                    let body_expr = Expr::FnCall(lace_ast::FnCallExpr {
+                        name: fn_name,
+                        type_arg: None,
+                        args: call_args,
+                        span,
+                    });
+                    let dummy_block_span = lace_ast::Span { start: 0, end: 0 };
+                    let body = lace_ast::Block {
+                        stmts: vec![],
+                        tail_expr: Some(Box::new(body_expr)),
+                        span: dummy_block_span,
+                    };
+                    return Ok(Value::Closure {
+                        params: new_params,
+                        body,
+                        captured_env,
+                    });
+                }
+
                 let args = call
                     .args
                     .iter()
@@ -3775,6 +3854,156 @@ impl Interpreter {
                     }
                 }
                 _ => Err(RuntimeError { message: "Fs.list_dir expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.list" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::read_dir(path) {
+                        Ok(entries) => {
+                            let mut names = Vec::new();
+                            for entry in entries.flatten() {
+                                names.push(Value::String(entry.file_name().to_string_lossy().to_string()));
+                            }
+                            names.sort_by(|a, b| cmp_values(a, b));
+                            Ok(Some(Value::List(names)))
+                        }
+                        Err(e) => Err(RuntimeError { message: format!("Fs.list error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.list expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.list_all" => match args.first() {
+                Some(Value::String(path)) => {
+                    fn walk_dir(dir: &std::path::Path, base: &std::path::Path, out: &mut Vec<Value>) {
+                        if let Ok(entries) = fs::read_dir(dir) {
+                            let mut sorted: Vec<_> = entries.flatten().collect();
+                            sorted.sort_by_key(|e| e.file_name());
+                            for entry in sorted {
+                                let ep = entry.path();
+                                let rel = ep.strip_prefix(base).unwrap_or(&ep);
+                                out.push(Value::String(rel.to_string_lossy().to_string()));
+                                if ep.is_dir() {
+                                    walk_dir(&ep, base, out);
+                                }
+                            }
+                        }
+                    }
+                    let p = std::path::Path::new(path);
+                    let mut names = Vec::new();
+                    walk_dir(p, p, &mut names);
+                    Ok(Some(Value::List(names)))
+                }
+                _ => Err(RuntimeError { message: "Fs.list_all expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.mkdir" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::create_dir_all(path) {
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.mkdir error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.mkdir expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.remove" => match args.first() {
+                Some(Value::String(path)) => {
+                    let p = std::path::Path::new(path);
+                    let result = if p.is_dir() { fs::remove_dir_all(p) } else { fs::remove_file(p) };
+                    match result {
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.remove error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.remove expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.copy" => match (args.first(), args.get(1)) {
+                (Some(Value::String(src)), Some(Value::String(dst))) => {
+                    match fs::copy(src, dst) {
+                        Ok(_) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.copy error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.copy expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.move" => match (args.first(), args.get(1)) {
+                (Some(Value::String(src)), Some(Value::String(dst))) => {
+                    match fs::rename(src, dst) {
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.move error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.move expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.stat" => match args.first() {
+                Some(Value::String(path)) => {
+                    match fs::metadata(path) {
+                        Ok(meta) => {
+                            let mut map = HashMap::new();
+                            map.insert("size".to_string(), Value::Int(meta.len() as i64));
+                            map.insert("is_file".to_string(), Value::Bool(meta.is_file()));
+                            map.insert("is_dir".to_string(), Value::Bool(meta.is_dir()));
+                            Ok(Some(Value::Map(map)))
+                        }
+                        Err(e) => Err(RuntimeError { message: format!("Fs.stat error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.stat expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.join" => {
+                let strs: Vec<&str> = args.iter().filter_map(|v| if let Value::String(s) = v { Some(s.as_str()) } else { None }).collect();
+                if strs.len() >= 2 {
+                    let mut p = std::path::PathBuf::from(strs[0]);
+                    for part in &strs[1..] { p = p.join(part); }
+                    Ok(Some(Value::String(p.to_string_lossy().to_string())))
+                } else {
+                    Err(RuntimeError { message: "Fs.join expects at least 2 String arguments".into(), span: None, propagated_err: None, propagated_none: false })
+                }
+            },
+            "Fs.basename" => match args.first() {
+                Some(Value::String(path)) => {
+                    let base = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    Ok(Some(Value::String(base)))
+                }
+                _ => Err(RuntimeError { message: "Fs.basename expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.dirname" => match args.first() {
+                Some(Value::String(path)) => {
+                    let dir = std::path::Path::new(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+                    Ok(Some(Value::String(dir)))
+                }
+                _ => Err(RuntimeError { message: "Fs.dirname expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.extension" => match args.first() {
+                Some(Value::String(path)) => {
+                    let ext = std::path::Path::new(path).extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+                    Ok(Some(Value::String(ext)))
+                }
+                _ => Err(RuntimeError { message: "Fs.extension expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.absolute" => match args.first() {
+                Some(Value::String(path)) => {
+                    let p = std::path::Path::new(path);
+                    let abs = if p.exists() {
+                        fs::canonicalize(p).map(|r| r.to_string_lossy().to_string()).unwrap_or_else(|_| path.clone())
+                    } else {
+                        std::env::current_dir().map(|d| d.join(p).to_string_lossy().to_string()).unwrap_or_else(|_| path.clone())
+                    };
+                    Ok(Some(Value::String(abs)))
+                }
+                _ => Err(RuntimeError { message: "Fs.absolute expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Fs.cwd" => {
+                match std::env::current_dir() {
+                    Ok(p) => Ok(Some(Value::String(p.to_string_lossy().to_string()))),
+                    Err(e) => Err(RuntimeError { message: format!("Fs.cwd error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                }
+            },
+            "Fs.chdir" => match args.first() {
+                Some(Value::String(path)) => {
+                    match std::env::set_current_dir(path) {
+                        Ok(()) => Ok(Some(Value::Unit)),
+                        Err(e) => Err(RuntimeError { message: format!("Fs.chdir error: {}", e), span: None, propagated_err: None, propagated_none: false }),
+                    }
+                }
+                _ => Err(RuntimeError { message: "Fs.chdir expects (String)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             // ── Time stdlib ──────────────────────────────────────────────────
             "Time.now" => {
