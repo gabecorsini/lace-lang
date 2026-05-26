@@ -89,6 +89,11 @@ fn did_you_mean_ident(name: &str, scope_keys: &[String]) -> Option<String> {
     }
     None
 }
+
+fn did_you_mean_module(name: &str) -> Option<&'static str> {
+    const MODULES: &[&str] = &["Fs","Shell","Math","List","Map","Str","Json","Time","Args","Process","Tuple","Int","Float","Regex","Http"];
+    MODULES.iter().filter(|&&m| levenshtein(name, m) <= 2).min_by_key(|&&m| levenshtein(name, m)).copied()
+}
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -1161,12 +1166,13 @@ impl Interpreter {
                     Ok(Value::String(name.clone()))
                 } else {
                     let scope_keys: Vec<String> = self.env.keys();
-                    let suggestion = did_you_mean_ident(name, &scope_keys);
-                    let message = if let Some(s) = suggestion {
-                        format!("unknown identifier '{}' — did you mean '{}'?", name, s)
-                    } else {
-                        format!("unknown identifier '{}'", name)
-                    };
+                    let ident_suggestion = did_you_mean_ident(name, &scope_keys);
+                    let module_suggestion = did_you_mean_module(name);
+                    let hint = module_suggestion
+                        .map(|m| format!(" — did you mean '{}'?", m))
+                        .or_else(|| ident_suggestion.map(|s| format!(" — did you mean '{}'?", s)))
+                        .unwrap_or_default();
+                    let message = format!("[E001] unknown identifier '{}'{}",  name, hint);
                     Err(RuntimeError {
                         message,
                         span: Some(*span),

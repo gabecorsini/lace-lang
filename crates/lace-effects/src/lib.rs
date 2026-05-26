@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
             self.issues.push(EffectIssue {
                 function: function.name.clone(),
                 level: IssueLevel::Error,
-                message: "missing effect annotation; functions must declare effects".into(),
+                message: format!("[FX001] function '{}' performs IO but has no [IO] effect annotation — try: fn {}() -> Unit [IO] {{ ... }}", function.name, function.name).into(),
             });
             return;
         }
@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
             self.issues.push(EffectIssue {
                 function: function.name.clone(),
                 level: IssueLevel::Error,
-                message: "function declared [Pure] but body performs side effects".into(),
+                message: format!("[FX002] function '{}' is declared [Pure] but calls IO operation — remove [Pure] or the IO call", function.name).into(),
             });
         }
 

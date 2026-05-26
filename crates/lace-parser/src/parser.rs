@@ -257,6 +257,17 @@ impl Parser {
             loop {
                 let pstart = self.curr_span().start;
                 let pname = self.expect_ident()?;
+                if !self.at(&TokenKind::Colon) {
+                    self.errors.push(ParseError::Message {
+                        message: format!(
+                            "[P001] function parameter '{}' is missing a type annotation — try: fn f(a: Int, b: String) -> ReturnType {{ ... }}",
+                            pname
+                        ),
+                        span_start: self.curr_span().start,
+                        span_end: self.curr_span().end,
+                    });
+                    return None;
+                }
                 self.expect(TokenKind::Colon)?;
                 let pty = self.parse_type_expr()?;
                 params.push(Param {
