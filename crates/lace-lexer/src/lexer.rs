@@ -414,6 +414,51 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_string(&mut self, start: usize) {
+        // Detect triple-quoted multiline string: """..."""
+        if self.chars.get(self.pos + 1).copied() == Some('"')
+            && self.chars.get(self.pos + 2).copied() == Some('"')
+        {
+            self.bump(); // first "
+            self.bump(); // second "
+            self.bump(); // third "
+            // Strip leading newline if the very first char after """ is \n
+            if self.peek() == Some('\n') {
+                self.bump();
+            }
+            let mut out = String::new();
+            loop {
+                match self.peek() {
+                    None => {
+                        self.errors.push(LexError::UnterminatedString {
+                            span_start: start,
+                            span_end: self.pos,
+                        });
+                        return;
+                    }
+                    Some('"') => {
+                        if self.chars.get(self.pos + 1).copied() == Some('"')
+                            && self.chars.get(self.pos + 2).copied() == Some('"')
+                        {
+                            self.bump();
+                            self.bump();
+                            self.bump();
+                            self.tokens.push(Token {
+                                kind: TokenKind::StringLit(out),
+                                span: Span { start, end: self.pos },
+                            });
+                            return;
+                        } else {
+                            out.push('"');
+                            self.bump();
+                        }
+                    }
+                    Some(ch) => {
+                        out.push(ch);
+                        self.bump();
+                    }
+                }
+            }
+        }
         self.bump();
         let mut out = String::new();
 

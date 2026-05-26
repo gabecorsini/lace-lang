@@ -589,6 +589,43 @@ impl Checker {
         self.fn_sigs.insert("Async.race".into(), (vec![Type::Dynamic], Type::Dynamic));
         self.fn_sigs.insert("Async.spawn".into(), (vec![Type::Dynamic], Type::Dynamic));
         self.fn_sigs.insert("Async.await_handle".into(), (vec![Type::Dynamic], Type::Dynamic));
+        // Math stdlib
+        self.scopes[0].vars.insert("Math".into(), Type::Dynamic);
+        self.fn_sigs.insert("Math.pi".into(), (vec![], Type::Float));
+        self.fn_sigs.insert("Math.e".into(), (vec![], Type::Float));
+        self.fn_sigs.insert("Math.abs".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.sqrt".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.pow".into(), (vec![Type::Float, Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.floor".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Math.ceil".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Math.round".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Math.log".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.log2".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.log10".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.sin".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.cos".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.tan".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.min".into(), (vec![Type::Float, Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.max".into(), (vec![Type::Float, Type::Float], Type::Float));
+        self.fn_sigs.insert("Math.clamp".into(), (vec![Type::Float, Type::Float, Type::Float], Type::Float));
+        // Int stdlib
+        self.scopes[0].vars.insert("Int".into(), Type::Dynamic);
+        self.fn_sigs.insert("Int.abs".into(), (vec![Type::Int], Type::Int));
+        self.fn_sigs.insert("Int.max".into(), (vec![Type::Int, Type::Int], Type::Int));
+        self.fn_sigs.insert("Int.min".into(), (vec![Type::Int, Type::Int], Type::Int));
+        self.fn_sigs.insert("Int.pow".into(), (vec![Type::Int, Type::Int], Type::Int));
+        self.fn_sigs.insert("Int.to_float".into(), (vec![Type::Int], Type::Float));
+        self.fn_sigs.insert("Int.clamp".into(), (vec![Type::Int, Type::Int, Type::Int], Type::Int));
+        // Float stdlib
+        self.scopes[0].vars.insert("Float".into(), Type::Dynamic);
+        self.fn_sigs.insert("Float.abs".into(), (vec![Type::Float], Type::Float));
+        self.fn_sigs.insert("Float.floor".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Float.ceil".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Float.round".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Float.to_int".into(), (vec![Type::Float], Type::Int));
+        self.fn_sigs.insert("Float.is_nan".into(), (vec![Type::Float], Type::Bool));
+        self.fn_sigs.insert("Float.is_infinite".into(), (vec![Type::Float], Type::Bool));
+        self.fn_sigs.insert("Float.clamp".into(), (vec![Type::Float, Type::Float, Type::Float], Type::Float));
         // Env stdlib
         self.scopes[0].vars.insert("Env".into(), Type::Dynamic);
         self.fn_sigs.insert(

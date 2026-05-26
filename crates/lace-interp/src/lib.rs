@@ -38,6 +38,8 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Map.contains_key", "Map.entries", "Map.get", "Map.insert", "Map.keys",
         "Map.length", "Map.new", "Map.remove", "Map.values",
         "Map.merge", "Map.size", "Map.map_values",
+        "Map.from_pairs", "Map.update",
+        "Tuple.first", "Tuple.second", "Tuple.to_list",
         "Process.run", "Process.run_args",
         "Process.env",
         "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
@@ -51,6 +53,12 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "String.len", "String.pad_left", "String.pad_right", "String.repeat", "String.replace",
         "String.slice", "String.split", "String.starts_with", "String.to_lower", "String.to_upper", "String.trim",
         "Time.format", "Time.now", "Time.now_ms", "Time.parse", "Time.parse_date", "Time.since",
+        "Math.abs", "Math.sqrt", "Math.pow", "Math.floor", "Math.ceil", "Math.round",
+        "Math.log", "Math.log2", "Math.log10", "Math.sin", "Math.cos", "Math.tan",
+        "Math.pi", "Math.e", "Math.min", "Math.max", "Math.clamp",
+        "Int.abs", "Int.max", "Int.min", "Int.pow", "Int.to_float", "Int.clamp",
+        "Float.abs", "Float.floor", "Float.ceil", "Float.round", "Float.to_int",
+        "Float.is_nan", "Float.is_infinite", "Float.clamp",
     ];
     let best = KNOWN_METHODS.iter()
         .map(|&m| (m, levenshtein(qualified, m)))
@@ -360,6 +368,9 @@ impl Interpreter {
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
+        self.env.define("Math".into(), Value::String("Math".into()));
+        self.env.define("Int".into(), Value::String("Int".into()));
+        self.env.define("Float".into(), Value::String("Float".into()));
 
         self.load_imports(program)?;
         self.load_uses(program)?;
@@ -425,6 +436,9 @@ impl Interpreter {
         self.env.define("Process".into(), Value::String("Process".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
 
+        self.env.define("Math".into(), Value::String("Math".into()));
+        self.env.define("Int".into(), Value::String("Int".into()));
+        self.env.define("Float".into(), Value::String("Float".into()));
         self.load_imports(program)?;
         self.load_uses(program)?;
         self.register_items(program);
@@ -2584,6 +2598,56 @@ impl Interpreter {
                     Err(RuntimeError { message: "Map.map_values expects (Map, fn_ref)".into(), span: None, propagated_err: None, propagated_none: false })
                 }
             }
+            // Map.from_pairs: List<(String, Value)> -> Map
+            "Map.from_pairs" => match args.first() {
+                Some(Value::List(pairs)) => {
+                    let mut map = HashMap::new();
+                    for pair in pairs {
+                        match pair {
+                            Value::Tuple(t) if t.len() >= 2 => {
+                                if let Value::String(k) = &t[0] {
+                                    map.insert(k.clone(), t[1].clone());
+                                } else {
+                                    return Err(RuntimeError { message: "Map.from_pairs: tuple key must be String".into(), span: None, propagated_err: None, propagated_none: false });
+                                }
+                            }
+                            _ => return Err(RuntimeError { message: "Map.from_pairs: list elements must be (String, value) tuples".into(), span: None, propagated_err: None, propagated_none: false }),
+                        }
+                    }
+                    Ok(Some(Value::Map(map)))
+                }
+                _ => Err(RuntimeError { message: "Map.from_pairs expects a List of tuples".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // Map.update: (Map, String, fn(Value)->Value) -> Map
+            "Map.update" => {
+                let (map_val, key_val, callable) = match (args.first(), args.get(1), args.get(2)) {
+                    (Some(m), Some(k), Some(c)) => (m.clone(), k.clone(), c.clone()),
+                    _ => return Err(RuntimeError { message: "Map.update expects (Map, String, fn)".into(), span: None, propagated_err: None, propagated_none: false }),
+                };
+                if let (Value::Map(m), Value::String(key)) = (map_val, key_val) {
+                    let mut new_map = m.clone();
+                    if let Some(old_val) = m.get(&key) {
+                        let new_val = self.call_callable(callable, vec![old_val.clone()], Span::default())?;
+                        new_map.insert(key, new_val);
+                    }
+                    Ok(Some(Value::Map(new_map)))
+                } else {
+                    Err(RuntimeError { message: "Map.update expects (Map, String, fn)".into(), span: None, propagated_err: None, propagated_none: false })
+                }
+            }
+            // Tuple accessors
+            "Tuple.first" => match args.first() {
+                Some(Value::Tuple(t)) if !t.is_empty() => Ok(Some(t[0].clone())),
+                _ => Err(RuntimeError { message: "Tuple.first expects a non-empty Tuple".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Tuple.second" => match args.first() {
+                Some(Value::Tuple(t)) if t.len() >= 2 => Ok(Some(t[1].clone())),
+                _ => Err(RuntimeError { message: "Tuple.second expects a Tuple with at least 2 elements".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Tuple.to_list" => match args.first() {
+                Some(Value::Tuple(t)) => Ok(Some(Value::List(t.clone()))),
+                _ => Err(RuntimeError { message: "Tuple.to_list expects a Tuple".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
             // Result / Option variant constructors
             "Ok" => {
                 let v = args.first().cloned().unwrap_or(Value::Unit);
@@ -3677,6 +3741,165 @@ impl Interpreter {
                     Ok(Some(Value::Int(count)))
                 }
                 _ => Err(RuntimeError { message: "Str.count expects (String, String)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+
+            // ── Math module ──────────────────────────────────────────────
+            "Math.pi" => Ok(Some(Value::Float(std::f64::consts::PI))),
+            "Math.e" => Ok(Some(Value::Float(std::f64::consts::E))),
+            "Math.abs" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.abs()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).abs()))),
+                _ => Err(RuntimeError { message: "Math.abs expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.sqrt" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.sqrt()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).sqrt()))),
+                _ => Err(RuntimeError { message: "Math.sqrt expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.pow" => match (args.first(), args.get(1)) {
+                (Some(Value::Float(base)), Some(Value::Float(exp))) => Ok(Some(Value::Float(base.powf(*exp)))),
+                (Some(Value::Int(base)), Some(Value::Int(exp))) => Ok(Some(Value::Float((*base as f64).powf(*exp as f64)))),
+                (Some(Value::Float(base)), Some(Value::Int(exp))) => Ok(Some(Value::Float(base.powf(*exp as f64)))),
+                (Some(Value::Int(base)), Some(Value::Float(exp))) => Ok(Some(Value::Float((*base as f64).powf(*exp)))),
+                _ => Err(RuntimeError { message: "Math.pow expects (Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.floor" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.floor() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Math.floor expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.ceil" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.ceil() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Math.ceil expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.round" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.round() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Math.round expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.log" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.ln()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).ln()))),
+                _ => Err(RuntimeError { message: "Math.log expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.log2" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.log2()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).log2()))),
+                _ => Err(RuntimeError { message: "Math.log2 expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.log10" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.log10()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).log10()))),
+                _ => Err(RuntimeError { message: "Math.log10 expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.sin" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.sin()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).sin()))),
+                _ => Err(RuntimeError { message: "Math.sin expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.cos" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.cos()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).cos()))),
+                _ => Err(RuntimeError { message: "Math.cos expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.tan" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.tan()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).tan()))),
+                _ => Err(RuntimeError { message: "Math.tan expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.min" => match (args.first(), args.get(1)) {
+                (Some(Value::Float(a)), Some(Value::Float(b))) => Ok(Some(Value::Float(a.min(*b)))),
+                (Some(Value::Int(a)), Some(Value::Int(b))) => Ok(Some(Value::Float((*a as f64).min(*b as f64)))),
+                (Some(Value::Float(a)), Some(Value::Int(b))) => Ok(Some(Value::Float(a.min(*b as f64)))),
+                (Some(Value::Int(a)), Some(Value::Float(b))) => Ok(Some(Value::Float((*a as f64).min(*b)))),
+                _ => Err(RuntimeError { message: "Math.min expects (Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.max" => match (args.first(), args.get(1)) {
+                (Some(Value::Float(a)), Some(Value::Float(b))) => Ok(Some(Value::Float(a.max(*b)))),
+                (Some(Value::Int(a)), Some(Value::Int(b))) => Ok(Some(Value::Float((*a as f64).max(*b as f64)))),
+                (Some(Value::Float(a)), Some(Value::Int(b))) => Ok(Some(Value::Float(a.max(*b as f64)))),
+                (Some(Value::Int(a)), Some(Value::Float(b))) => Ok(Some(Value::Float((*a as f64).max(*b)))),
+                _ => Err(RuntimeError { message: "Math.max expects (Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Math.clamp" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::Float(x)), Some(Value::Float(lo)), Some(Value::Float(hi))) => Ok(Some(Value::Float(x.clamp(*lo, *hi)))),
+                (Some(Value::Int(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Float((*x as f64).clamp(*lo as f64, *hi as f64)))),
+                (Some(Value::Float(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Float(x.clamp(*lo as f64, *hi as f64)))),
+                _ => Err(RuntimeError { message: "Math.clamp expects (Float, Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // ── Int module ───────────────────────────────────────────────
+            "Int.abs" => match args.first() {
+                Some(Value::Int(x)) => Ok(Some(Value::Int(x.abs()))),
+                _ => Err(RuntimeError { message: "Int.abs expects (Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Int.max" => match (args.first(), args.get(1)) {
+                (Some(Value::Int(a)), Some(Value::Int(b))) => Ok(Some(Value::Int(*a.max(b)))),
+                _ => Err(RuntimeError { message: "Int.max expects (Int, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Int.min" => match (args.first(), args.get(1)) {
+                (Some(Value::Int(a)), Some(Value::Int(b))) => Ok(Some(Value::Int(*a.min(b)))),
+                _ => Err(RuntimeError { message: "Int.min expects (Int, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Int.pow" => match (args.first(), args.get(1)) {
+                (Some(Value::Int(base)), Some(Value::Int(exp))) => {
+                    if *exp < 0 {
+                        Ok(Some(Value::Int(0)))
+                    } else {
+                        Ok(Some(Value::Int(base.pow(*exp as u32))))
+                    }
+                }
+                _ => Err(RuntimeError { message: "Int.pow expects (Int, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Int.to_float" => match args.first() {
+                Some(Value::Int(x)) => Ok(Some(Value::Float(*x as f64))),
+                _ => Err(RuntimeError { message: "Int.to_float expects (Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Int.clamp" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::Int(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Int((*x).clamp(*lo, *hi)))),
+                _ => Err(RuntimeError { message: "Int.clamp expects (Int, Int, Int)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // ── Float module ─────────────────────────────────────────────
+            "Float.abs" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Float(x.abs()))),
+                Some(Value::Int(x)) => Ok(Some(Value::Float((*x as f64).abs()))),
+                _ => Err(RuntimeError { message: "Float.abs expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.floor" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.floor() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Float.floor expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.ceil" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.ceil() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Float.ceil expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.round" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(x.round() as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Float.round expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.to_int" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Int(*x as i64))),
+                Some(Value::Int(x)) => Ok(Some(Value::Int(*x))),
+                _ => Err(RuntimeError { message: "Float.to_int expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.is_nan" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Bool(x.is_nan()))),
+                Some(Value::Int(_)) => Ok(Some(Value::Bool(false))),
+                _ => Err(RuntimeError { message: "Float.is_nan expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.is_infinite" => match args.first() {
+                Some(Value::Float(x)) => Ok(Some(Value::Bool(x.is_infinite()))),
+                Some(Value::Int(_)) => Ok(Some(Value::Bool(false))),
+                _ => Err(RuntimeError { message: "Float.is_infinite expects (Float)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            "Float.clamp" => match (args.first(), args.get(1), args.get(2)) {
+                (Some(Value::Float(x)), Some(Value::Float(lo)), Some(Value::Float(hi))) => Ok(Some(Value::Float(x.clamp(*lo, *hi)))),
+                (Some(Value::Int(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Float((*x as f64).clamp(*lo as f64, *hi as f64)))),
+                (Some(Value::Float(x)), Some(Value::Int(lo)), Some(Value::Int(hi))) => Ok(Some(Value::Float(x.clamp(*lo as f64, *hi as f64)))),
+                _ => Err(RuntimeError { message: "Float.clamp expects (Float, Float, Float)".into(), span: None, propagated_err: None, propagated_none: false }),
             },
             _ => Ok(None),
         }

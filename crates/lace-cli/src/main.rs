@@ -4,6 +4,8 @@ use std::{
     time::Instant,
 };
 
+mod lint;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -179,6 +181,14 @@ enum Commands {
         /// Suppress warnings
         #[arg(long)]
         no_warnings: bool,
+    },
+    /// Run source-level lint checks on a .lace file
+    ///
+    /// Checks for: unused let bindings (L001), functions with no effect
+    /// annotation (L002), shadowed variables (L003).
+    Lint {
+        /// The .lace file to lint
+        file: PathBuf,
     },
 }
 
@@ -452,6 +462,39 @@ fn run() -> Result<()> {
         }
         Commands::Watch { file, no_warnings } => {
             run_watch(&file, no_warnings)?;
+        }
+        Commands::Lint { file } => {
+            let source = load_source(&file)?;
+            let (program, parse_errors) = lace_parser::parse_program(&source);
+            if !parse_errors.is_empty() {
+                for err in &parse_errors {
+                    eprintln!("{} {err}", "parse error:".red().bold());
+                }
+                std::process::exit(1);
+            }
+            let program = match program {
+                Some(p) => p,
+                None => {
+                    eprintln!("{}", "parse error: no program".red().bold());
+                    std::process::exit(1);
+                }
+            };
+            let warnings = lint::lint_program(&program, &source);
+            let count = warnings.len();
+            for w in &warnings {
+                println!(
+                    "{} [{}] {}",
+                    "warning".yellow().bold(),
+                    w.rule,
+                    w.message
+                );
+            }
+            if count == 0 {
+                println!("{} no lint issues found", "lint ok:".green().bold());
+            } else {
+                println!("{} {} lint warning(s)", "lint:".yellow().bold(), count);
+                std::process::exit(1);
+            }
         }
     }
 
