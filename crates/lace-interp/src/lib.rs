@@ -373,7 +373,15 @@ impl Interpreter {
             }
         }
 
-        let out = if self.functions.contains_key("main") {
+        // Auto-call main() only if there is no explicit top-level call to main()
+        let has_explicit_main_call = program.items.iter().any(|item| {
+            if let TopLevelItem::Statement(Stmt::Expr(Expr::FnCall(call))) = item {
+                call.name == "main"
+            } else {
+                false
+            }
+        });
+        let out = if self.functions.contains_key("main") && !has_explicit_main_call {
             self.call_function("main", vec![], Span::default())
         } else {
             Ok(Value::Unit)
@@ -529,6 +537,32 @@ impl Interpreter {
 
         // Try relative to current file's directory first
         let candidate = base_dir.join(&rel_path);
+
+        // If the full path file doesn't exist AND there are 2+ segments,
+        // try treating the last segment as a function name to import from the prefix module.
+        if !candidate.exists() && use_decl.path.len() >= 2 {
+            let fn_name = use_decl.path.last().unwrap().clone();
+            let module_path_parts = &use_decl.path[..use_decl.path.len() - 1];
+            let module_rel: PathBuf = module_path_parts.iter().collect::<PathBuf>().with_extension("lace");
+            let module_candidate = base_dir.join(&module_rel);
+            if module_candidate.exists() {
+                // Build a synthetic UseDecl that loads just the module
+                let synthetic = lace_ast::UseDecl {
+                    path: module_path_parts.to_vec(),
+                    imports: Some(vec![fn_name.clone()]),
+                    alias: None,
+                    span: use_decl.span,
+                };
+                self.load_module_from_use(base_dir, &synthetic)?;
+                // Also register the function under its bare name
+                let alias = module_path_parts.last().unwrap().clone();
+                let qualified = format!("{}.{}", alias, fn_name);
+                if let Some(def) = self.functions.get(&qualified).cloned() {
+                    self.functions.insert(fn_name, def);
+                }
+                return Ok(());
+            }
+        }
 
         // Also find project root (lace.toml) for absolute resolution
         let module_path = if candidate.exists() {
@@ -716,6 +750,20 @@ impl Interpreter {
         self.module_name = prev_module;
 
         self.env.define(module_name.clone(), Value::String(module_name.clone()));
+
+        // If selective imports were requested (e.g. `use utils.{double, triple}`),
+        // register each named symbol under its bare name.
+        if let Some(import_names) = &use_decl.imports {
+            let alias = module_name.clone();
+            for name in import_names {
+                let qualified = format!("{}.{}", alias, name);
+                if let Some(def) = self.functions.get(&qualified).cloned() {
+                    self.functions.insert(name.clone(), def);
+                } else if let Some(v) = self.env.get(&qualified) {
+                    self.env.define(name.clone(), v);
+                }
+            }
+        }
 
         Ok(())
     }

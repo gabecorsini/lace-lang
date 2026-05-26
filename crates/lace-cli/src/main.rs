@@ -221,6 +221,7 @@ fn run() -> Result<()> {
                     Ok(value) => {
                         if quiet {
                             match &value {
+                                Value::Unit => {} // suppress Unit output in quiet mode
                                 Value::String(s) => println!("{}", s),
                                 other => println!("{:?}", other),
                             }
@@ -1217,7 +1218,11 @@ fn run_doc(path: Option<PathBuf>) -> Result<()> {
 
     // Collect .lace files
     let mut lace_files: Vec<PathBuf> = Vec::new();
-    collect_lace_files_recursive(&dir, &mut lace_files)?;
+    if dir.is_file() {
+        lace_files.push(dir.clone());
+    } else {
+        collect_lace_files_recursive(&dir, &mut lace_files)?;
+    }
     lace_files.sort();
 
     if lace_files.is_empty() {
@@ -1324,7 +1329,11 @@ fn run_doc(path: Option<PathBuf>) -> Result<()> {
     }
 
     // Create docs/ output directory
-    let out_dir = dir.join("docs");
+    let out_dir = if dir.is_file() {
+        dir.parent().unwrap_or(&dir).join("docs")
+    } else {
+        dir.join("docs")
+    };
     fs::create_dir_all(&out_dir).context("failed to create docs/ directory")?;
 
     // CSS (inlined into index.html)

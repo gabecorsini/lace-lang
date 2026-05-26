@@ -1869,7 +1869,7 @@ impl Parser {
 
     fn parse_module_path(&mut self) -> Option<Vec<String>> {
         let mut parts = vec![self.expect_ident()?];
-        while self.match_tok(&TokenKind::Dot) {
+        while self.match_tok(&TokenKind::Dot) || self.match_tok(&TokenKind::ColonColon) {
             parts.push(self.expect_ident()?);
         }
         Some(parts)
@@ -1934,6 +1934,14 @@ impl Parser {
                 Some(DurationLit {
                     value: v,
                     unit: map_unit(u),
+                })
+            }
+            TokenKind::IntLit(v) => {
+                // Accept bare integer as seconds
+                self.bump();
+                Some(DurationLit {
+                    value: v as i64,
+                    unit: DurationUnit::S,
                 })
             }
             _ => {
