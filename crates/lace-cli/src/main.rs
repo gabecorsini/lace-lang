@@ -390,9 +390,7 @@ fn run() -> Result<()> {
             print_version();
         }
         Commands::Lsp => {
-            tokio::runtime::Runtime::new()
-                .expect("failed to create tokio runtime")
-                .block_on(lace_lsp::run_server());
+            lace_lsp::run_server();
         }
         Commands::Compile { file } => {
             let source = fs::read_to_string(&file)
