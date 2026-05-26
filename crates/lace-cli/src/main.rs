@@ -1127,6 +1127,20 @@ fn print_error_explanation(code: &str) {
              duplicate timeout, unknown mock function).\n\n\
              Example:\n  tool my_tool() -> String { retries: -1 }  // E005",
         )),
+        "E006" => Some((
+            "E006 — IO effect in pure function",
+            "A pure `fn` cannot call IO-tagged functions (Http, File, Process, etc.) \
+             or `tool` declarations. To perform IO, declare the function as `tool`.\n\n\
+             Example fix:\n\
+             # Before:\n\
+             fn fetch(url: String) -> String {\n\
+                 Http.get(url)  # ERROR: IO in pure fn\n\
+             }\n\n\
+             # After:\n\
+             tool fetch(url: String) -> Result<String, String> {\n\
+                 Http.get(url)\n\
+             }",
+        )),
         "W001" => Some((
             "W001 — Unused variable",
             "A variable was declared with 'let' but never referenced. \
