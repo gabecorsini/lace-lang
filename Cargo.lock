@@ -563,6 +563,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "lace-ast",
+ "lace-effects",
  "lace-parser",
  "lace-types",
  "regex",

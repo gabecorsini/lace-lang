@@ -17,4 +17,5 @@ regex = "1"
 
 [dev-dependencies]
 lace-types = { path = "../lace-types" }
+lace-effects = { path = "../lace-effects" }
 
