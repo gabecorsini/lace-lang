@@ -37,6 +37,8 @@
       <li><a href="#check">lace check</a></li>
       <li><a href="#build">lace build</a></li>
       <li><a href="#fmt">lace fmt</a></li>
+      <li><a href="#test">lace test</a></li>
+      <li><a href="#watch">lace watch</a></li>
       <li><a href="#doc">lace doc</a></li>
       <li><a href="#explain">lace explain</a></li>
       <li><a href="#lsp">lace lsp</a></li>
@@ -85,8 +87,34 @@ lace run src/main.lace --vm</code></pre>
 
     <h2 id="fmt">lace fmt</h2>
     <p>Format a <code>.lace</code> file in place. Idempotent — formatted files are unchanged on re-run.</p>
-    <pre><code>lace fmt &lt;file&gt;</code></pre>
+    <pre><code>lace fmt &lt;file&gt; [--check] [--stdout]</code></pre>
     <pre><code>lace fmt src/main.lace</code></pre>
+    <table>
+      <tr><th>Flag</th><th>Description</th></tr>
+      <tr><td><code>--check</code></td><td>Exit 1 if the file would be changed; useful for CI</td></tr>
+      <tr><td><code>--stdout</code></td><td>Write formatted output to stdout instead of in-place</td></tr>
+    </table>
+
+    <h2 id="test">lace test</h2>
+    <p>Discover and run all <code>@test</code>-annotated functions in a file or directory. Reports pass/fail counts and exits non-zero if any test fails.</p>
+    <pre><code>lace test &lt;path&gt;</code></pre>
+    <pre><code>lace test src/
+lace test tests/my_tests.lace
+# running 4 tests
+# test add_works ... ok
+# test divide_by_zero ... ok
+# test result: ok. 4 passed; 0 failed; finished in 0.02s</code></pre>
+    <p>Mark any top-level function with <code>@test</code> — it will be discovered and executed automatically:</p>
+    <pre><code>@test
+fn add_works() {
+  assert(1 + 1 == 2)
+}</code></pre>
+
+    <h2 id="watch">lace watch</h2>
+    <p>Run a file immediately, then watch it for changes and re-run on every save. Clears the terminal before each re-run. Press <kbd>Ctrl+C</kbd> to exit.</p>
+    <pre><code>lace watch &lt;file&gt;</code></pre>
+    <pre><code>lace watch script.lace   # run and re-run on save</code></pre>
+    <p>Uses modification-time polling (500 ms interval) — no external file-watching tools required.</p>
 
     <h2 id="doc">lace doc</h2>
     <p>Generate HTML documentation from <code>##</code> doc comments. Outputs to <code>docs/</code>.</p>
@@ -143,6 +171,7 @@ lace vm src/main.lace   # compiles on the fly</code></pre>
       <tr><td><code>E003</code></td><td>ArityMismatch</td><td>Wrong number of arguments to a function or tool call.</td></tr>
       <tr><td><code>E004</code></td><td>NotCallable</td><td>Attempted to call something that isn't a function or tool.</td></tr>
       <tr><td><code>E005</code></td><td>MissingField</td><td>Record field access on a field that doesn't exist.</td></tr>
+      <tr><td><code>E006</code></td><td>PureFnCallsEffectful</td><td>A pure <code>fn</code> calls a <code>tool</code> or effectful stdlib function. This is a hard error — declare the function as <code>tool</code>.</td></tr>
       <tr><td><code>W001</code></td><td>UnusedVariable</td><td>Variable declared but never read.</td></tr>
       <tr><td><code>W002</code></td><td>UnreachableCode</td><td>Code after an unconditional return.</td></tr>
       <tr><td><code>W003</code></td><td><em>reserved</em></td><td>—</td></tr>

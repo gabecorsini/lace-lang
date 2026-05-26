@@ -172,6 +172,14 @@ enum Commands {
         #[arg(long)]
         output: Option<String>,
     },
+    /// Watch a .lace file and re-run it on every save (Ctrl+C to stop)
+    Watch {
+        /// The .lace file to watch and run
+        file: PathBuf,
+        /// Suppress warnings
+        #[arg(long)]
+        no_warnings: bool,
+    },
 }
 
 fn main() {
@@ -441,6 +449,9 @@ fn run() -> Result<()> {
         }
         Commands::Bundle { file, output } => {
             run_bundle(&file, output.as_deref())?;
+        }
+        Commands::Watch { file, no_warnings } => {
+            run_watch(&file, no_warnings)?;
         }
     }
 
@@ -1916,4 +1927,89 @@ fn run_bundle(file: &str, output: Option<&str>) -> Result<()> {
     );
 
     Ok(())
+}
+
+// ─── lace watch ──────────────────────────────────────────────────────────────
+
+fn run_watch(file: &Path, no_warnings: bool) -> Result<()> {
+    use std::time::{Duration, SystemTime};
+
+    let file = file.to_path_buf();
+
+    // Helper: get mtime, returns SystemTime::UNIX_EPOCH on error
+    let get_mtime = |p: &Path| -> SystemTime {
+        fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    };
+
+    // Helper: run the file once
+    let run_once = |p: &Path, no_warn: bool| {
+        // Clear terminal
+        print!("\x1B[2J\x1B[H");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+
+        eprintln!(
+            "{} {}",
+            "watch:".cyan().bold(),
+            p.display()
+        );
+
+        let source = match fs::read_to_string(p) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{} {}", "error reading file:".red().bold(), e);
+                return;
+            }
+        };
+
+        match validate_source_with_warnings(&source, no_warn) {
+            Ok((program, effect_issues)) => {
+                print_effect_summary(&program, &effect_issues);
+
+                let options = RunOptions {
+                    checkpoint_path: None,
+                    replay_mode: false,
+                    source_path: Some(p.display().to_string()),
+                    suppress_tool_log: true,
+                    log_file: None,
+                };
+
+                match run_with_options(&program, options) {
+                    Ok(value) => {
+                        if !matches!(value, Value::Unit) {
+                            println!("{}", render_value(&value).bright_white());
+                        }
+                    }
+                    Err(err) => {
+                        report_runtime_error(&source, &err);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{} {}", "error:".red().bold(), e);
+            }
+        }
+    };
+
+    eprintln!(
+        "{} watching {} — press Ctrl+C to stop",
+        "watch:".cyan().bold(),
+        file.display()
+    );
+
+    // Run immediately
+    run_once(&file, no_warnings);
+
+    let mut last_mtime = get_mtime(&file);
+
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+
+        let mtime = get_mtime(&file);
+        if mtime != last_mtime {
+            last_mtime = mtime;
+            run_once(&file, no_warnings);
+        }
+    }
 }
