@@ -664,32 +664,34 @@ fn run_new(name: &str) -> Result<()> {
         anyhow::bail!("directory '{}' already exists", name);
     }
 
-    let src_dir = project_dir.join("src");
-    fs::create_dir_all(&src_dir)
-        .with_context(|| format!("failed to create {}", src_dir.display()))?;
+    fs::create_dir_all(&project_dir)
+        .with_context(|| format!("failed to create {}", project_dir.display()))?;
 
-    // lace.toml
-    let manifest_content = format!(
-        "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"
+    // main.lace
+    let main_content = format!(
+        "fn main() -> Unit [IO] {{\n    println(\"Hello from {name}!\")\n}}\n"
     );
-    fs::write(project_dir.join("lace.toml"), &manifest_content)
-        .context("failed to write lace.toml")?;
+    fs::write(project_dir.join("main.lace"), &main_content)
+        .context("failed to write main.lace")?;
 
-    // src/main.lace
-    let main_content = "fn main() [IO] {\n    println(\"Hello from {name}!\")\n}\n"
-        .replace("{name}", name);
-    fs::write(src_dir.join("main.lace"), &main_content)
-        .context("failed to write src/main.lace")?;
+    // lib.lace
+    let lib_content = "# Library module\n";
+    fs::write(project_dir.join("lib.lace"), lib_content)
+        .context("failed to write lib.lace")?;
 
-    // src/ is already created above — no extra work needed
+    // README.md
+    let readme_content = format!(
+        "# {name}\n\nA Lace project.\n\n## Getting Started\n\n```\nlace run main.lace\n```\n"
+    );
+    fs::write(project_dir.join("README.md"), &readme_content)
+        .context("failed to write README.md")?;
 
-    println!("{} {}", "created".green().bold(), name.bold());
-    println!("  {}", format!("{name}/lace.toml").dimmed());
-    println!("  {}", format!("{name}/src/main.lace").dimmed());
-    println!();
-    println!("To get started:");
-    println!("  cd {name}");
-    println!("  lace run");
+    // .gitignore
+    let gitignore_content = "*.lacec\n.lace-cache/\n";
+    fs::write(project_dir.join(".gitignore"), gitignore_content)
+        .context("failed to write .gitignore")?;
+
+    println!("Created project '{name}'");
 
     Ok(())
 }

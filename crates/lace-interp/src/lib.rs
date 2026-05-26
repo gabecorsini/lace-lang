@@ -1191,6 +1191,19 @@ impl Interpreter {
                 let value = self.eval_expr(&m.expr)?;
                 for arm in &m.arms {
                     if let Some(bindings) = self.try_match(&arm.pattern, &value) {
+                        // Check guard if present
+                        if let Some(guard_expr) = &arm.guard {
+                            self.env.push();
+                            for (k, v) in &bindings {
+                                self.env.define(k.clone(), v.clone());
+                            }
+                            let guard_val = self.eval_expr(guard_expr);
+                            self.env.pop();
+                            match guard_val? {
+                                Value::Bool(false) => continue,
+                                _ => {}
+                            }
+                        }
                         self.env.push();
                         for (k, v) in bindings {
                             self.env.define(k, v);

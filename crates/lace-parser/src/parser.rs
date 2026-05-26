@@ -1620,11 +1620,18 @@ impl Parser {
         while !self.at(&TokenKind::RBrace) && !self.at(&TokenKind::Eof) {
             let astart = self.curr_span().start;
             let pat = self.parse_pattern()?;
+            let guard = if self.at(&TokenKind::If) {
+                self.bump();
+                Some(Box::new(self.parse_expr()?))
+            } else {
+                None
+            };
             self.expect(TokenKind::FatArrow)?;
             let arm_expr = self.parse_expr()?;
             self.match_tok(&TokenKind::Comma);
             arms.push(MatchArm {
                 pattern: pat,
+                guard,
                 expr: arm_expr,
                 span: Span {
                     start: astart,

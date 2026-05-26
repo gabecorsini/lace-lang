@@ -461,6 +461,7 @@ pub struct MatchExpr {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatchArm {
     pub pattern: Pattern,
+    pub guard: Option<Box<Expr>>,
     pub expr: Expr,
     pub span: Span,
 }
