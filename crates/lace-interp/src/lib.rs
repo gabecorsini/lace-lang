@@ -27,7 +27,9 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Fs.append", "Fs.delete", "Fs.exists", "Fs.list_dir", "Fs.read", "Fs.write",
         "Http.get", "Http.get_header", "Http.post", "Http.post_json",
         "Http.get_with_headers", "Http.response", "Http.serve", "Http.serve_routes",
+        "Http.post_form", "Http.get_json",
         "Json.get", "Json.index", "Json.keys", "Json.parse", "Json.stringify", "Json.validate",
+        "Json.pretty",
         "List.all", "List.any", "List.contains", "List.filter", "List.filter_map",
         "List.find", "List.flat_map", "List.fold", "List.for_each", "List.get",
         "List.join", "List.length", "List.map", "List.max", "List.min", "List.range",
@@ -42,6 +44,7 @@ fn did_you_mean_method(qualified: &str) -> Option<String> {
         "Tuple.first", "Tuple.second", "Tuple.to_list",
         "Process.run", "Process.run_args",
         "Process.env",
+        "Shell.run", "Shell.capture", "Shell.success", "Shell.env", "Shell.set_env",
         "Regex.captures", "Regex.find", "Regex.find_all", "Regex.is_match",
         "Regex.replace", "Regex.replace_all",
         "Str.char_at", "Str.contains", "Str.ends_with", "Str.index_of", "Str.join",
@@ -367,6 +370,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Shell".into(), Value::String("Shell".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
         self.env.define("Math".into(), Value::String("Math".into()));
         self.env.define("Int".into(), Value::String("Int".into()));
@@ -434,6 +438,7 @@ impl Interpreter {
         self.env.define("Str".into(), Value::String("Str".into()));
         self.env.define("Regex".into(), Value::String("Regex".into()));
         self.env.define("Process".into(), Value::String("Process".into()));
+        self.env.define("Shell".into(), Value::String("Shell".into()));
         self.env.define("Async".into(), Value::String("Async".into()));
 
         self.env.define("Math".into(), Value::String("Math".into()));
@@ -3457,6 +3462,213 @@ impl Interpreter {
                     result
                 }
                 _ => Err(RuntimeError { message: "Json.validate expects (Map, Map)".into(), span: None, propagated_err: None, propagated_none: false }),
+            },
+            // Json.pretty
+            "Json.pretty" => {
+                let val = args.first().cloned().unwrap_or(Value::Unit);
+                let json_val = value_to_json(&val);
+                let pretty = serde_json::to_string_pretty(&json_val).unwrap_or_default();
+                Ok(Some(Value::String(pretty)))
+            }
+            // Shell stdlib ─────────────────────────────────────────────────
+            "Shell.run" => match args.first() {
+                Some(Value::String(cmd)) => {
+                    let output = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .output()
+                        .map_err(|e| RuntimeError {
+                            message: format!("Shell.run error: {}", e),
+                            span: None,
+                            propagated_err: None,
+                            propagated_none: false,
+                        })?;
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    let exit_code = output.status.code().unwrap_or(-1) as i64;
+                    let mut map = HashMap::new();
+                    map.insert("stdout".to_string(), Value::String(stdout));
+                    map.insert("stderr".to_string(), Value::String(stderr));
+                    map.insert("exit_code".to_string(), Value::Int(exit_code));
+                    Ok(Some(Value::Map(map)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Shell.run expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            "Shell.capture" => match args.first() {
+                Some(Value::String(cmd)) => {
+                    let output = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .output()
+                        .map_err(|e| RuntimeError {
+                            message: format!("Shell.capture error: {}", e),
+                            span: None,
+                            propagated_err: None,
+                            propagated_none: false,
+                        })?;
+                    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    Ok(Some(Value::String(stdout)))
+                }
+                _ => Err(RuntimeError {
+                    message: "Shell.capture expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            "Shell.success" => match args.first() {
+                Some(Value::String(cmd)) => {
+                    let output = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .output()
+                        .map_err(|e| RuntimeError {
+                            message: format!("Shell.success error: {}", e),
+                            span: None,
+                            propagated_err: None,
+                            propagated_none: false,
+                        })?;
+                    Ok(Some(Value::Bool(output.status.success())))
+                }
+                _ => Err(RuntimeError {
+                    message: "Shell.success expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            "Shell.env" => match args.first() {
+                Some(Value::String(key)) => {
+                    match std::env::var(key) {
+                        Ok(val) => Ok(Some(Value::Variant {
+                            name: "Some".into(),
+                            payload: vec![Value::String(val)],
+                        })),
+                        Err(_) => Ok(Some(Value::Variant {
+                            name: "None".into(),
+                            payload: vec![],
+                        })),
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Shell.env expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            "Shell.set_env" => match (args.first(), args.get(1)) {
+                (Some(Value::String(key)), Some(Value::String(val))) => {
+                    std::env::set_var(key, val);
+                    Ok(Some(Value::Unit))
+                }
+                _ => Err(RuntimeError {
+                    message: "Shell.set_env expects (String, String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            // Http.post_form
+            "Http.post_form" => match (args.first(), args.get(1)) {
+                (Some(Value::String(url)), Some(Value::Map(fields))) => {
+                    let started = Instant::now();
+                    let form_pairs: Vec<(&str, String)> = fields.iter()
+                        .filter_map(|(k, v)| {
+                            if let Value::String(s) = v { Some((k.as_str(), s.clone())) } else { None }
+                        })
+                        .collect();
+                    let form_refs: Vec<(&str, &str)> = form_pairs.iter()
+                        .map(|(k, v)| (*k, v.as_str()))
+                        .collect();
+                    let result = ureq::post(url).send_form(&form_refs);
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match result {
+                        Ok(resp) => {
+                            let status = resp.status() as i64;
+                            let body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.post_form", "Http", json!([url]), json!(body), duration_ms)?;
+                            let mut map = HashMap::new();
+                            map.insert("status".to_string(), Value::Int(status));
+                            map.insert("body".to_string(), Value::String(body));
+                            Ok(Some(Value::Map(map)))
+                        }
+                        Err(ureq::Error::Status(code, resp)) => {
+                            let body = resp.into_string().unwrap_or_default();
+                            let mut map = HashMap::new();
+                            map.insert("status".to_string(), Value::Int(code as i64));
+                            map.insert("body".to_string(), Value::String(body));
+                            map.insert("error".to_string(), Value::Bool(true));
+                            Ok(Some(Value::Map(map)))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            self.log_effect("Http.post_form", "Http", json!([url]), json!(msg), duration_ms)?;
+                            let mut map = HashMap::new();
+                            map.insert("status".to_string(), Value::Int(0));
+                            map.insert("body".to_string(), Value::String(msg));
+                            map.insert("error".to_string(), Value::Bool(true));
+                            Ok(Some(Value::Map(map)))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.post_form expects (String, Map)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
+            },
+            // Http.get_json
+            "Http.get_json" => match args.first() {
+                Some(Value::String(url)) => {
+                    let started = Instant::now();
+                    let result = ureq::get(url).call();
+                    let duration_ms = started.elapsed().as_millis() as i64;
+                    match result {
+                        Ok(resp) => {
+                            let body = resp.into_string().unwrap_or_default();
+                            self.log_effect("Http.get_json", "Http", json!([url]), json!(body), duration_ms)?;
+                            match serde_json::from_str::<JsonValue>(&body) {
+                                Ok(jv) => Ok(Some(json_to_lace_value(jv).into())),
+                                Err(e) => {
+                                    let mut map = HashMap::new();
+                                    map.insert("error".to_string(), Value::Bool(true));
+                                    map.insert("body".to_string(), Value::String(body));
+                                    map.insert("parse_error".to_string(), Value::String(e.to_string()));
+                                    Ok(Some(Value::Map(map)))
+                                }
+                            }
+                        }
+                        Err(ureq::Error::Status(code, resp)) => {
+                            let body = resp.into_string().unwrap_or_default();
+                            let mut map = HashMap::new();
+                            map.insert("status".to_string(), Value::Int(code as i64));
+                            map.insert("body".to_string(), Value::String(body));
+                            map.insert("error".to_string(), Value::Bool(true));
+                            Ok(Some(Value::Map(map)))
+                        }
+                        Err(e) => {
+                            let msg = e.to_string();
+                            let mut map = HashMap::new();
+                            map.insert("status".to_string(), Value::Int(0));
+                            map.insert("body".to_string(), Value::String(msg));
+                            map.insert("error".to_string(), Value::Bool(true));
+                            Ok(Some(Value::Map(map)))
+                        }
+                    }
+                }
+                _ => Err(RuntimeError {
+                    message: "Http.get_json expects (String)".into(),
+                    span: None,
+                    propagated_err: None,
+                    propagated_none: false,
+                }),
             },
             // Env stdlib
             "Env.get" => match args.first() {
